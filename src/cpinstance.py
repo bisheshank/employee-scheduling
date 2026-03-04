@@ -246,8 +246,9 @@ class CPInstance:
         # across employees.
         # This keeps only ONE representative solution per equivalence class.
         for e in range(E - 1):
-            # TODO: Need to handle tiebreakers or change this
-            self.solver.Add(shift[e][0] <= shift[e + 1][0])
+            self.solver.Add(
+                self.solver.LexicalLessOrEqual(shift[e], shift[e + 1])
+            )
 
         # SEARCH SPACE
         all_vars = []
