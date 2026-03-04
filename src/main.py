@@ -4,6 +4,7 @@ from pathlib import Path
 from cpinstance import CPInstance
 from model_timer import Timer
 
+
 def main():
     parser = ArgumentParser()
     parser.add_argument("input_file", type=str)
@@ -21,14 +22,15 @@ def main():
     instance = CPInstance(str(input_file))
     timer = Timer()
     timer.start()
-    is_solution, n_fails, schedule = instance.solve(time_limit_seconds=args.time_limit)
+    is_solution, n_fails, schedule = instance.solve(
+        time_limit_seconds=args.time_limit)
     timer.stop()
 
     resultdict = {}
     resultdict["Instance"] = filename
     resultdict["Time"] = timer.getTime()
     resultdict["Result"] = str(n_fails)
-    resultdict["Solution"] = schedule 
+    resultdict["Solution"] = schedule
     # feel free to return a different format for schedule from instance.solve
     # but make sure the Solution matches the format in the handout!
 
@@ -37,6 +39,7 @@ def main():
     #     instance.prettyPrint(instance.numEmployees, instance.numDays, schedule)
     #     instance.generateVisualizerInput(instance.numEmployees, instance.numDays, schedule)
     print(json.dumps(resultdict))
+
 
 if __name__ == "__main__":
     main()

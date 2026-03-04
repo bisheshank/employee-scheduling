@@ -84,13 +84,12 @@ class CPInstance:
         """
 
         SHIFTS = [
-            (0, "Off", 24, 24),  # special marker
             (1, "Night", 0, 8),
             (2, "Day", 8, 16),
             (3, "Evening", 16, 24)
         ]
 
-        tuples = [(0, 24, 24, 0)]
+        tuples = [(0, 24, 24, 0)]  # Off shift added once
 
         for shift_id, _, shift_start, shift_end in SHIFTS:
             tuples += [
@@ -109,12 +108,57 @@ class CPInstance:
         time_limit_seconds: Optional[float] = None,
     ):
         """
-        Employee Scheduling Model 
+        Employee Scheduling Model
         """
 
-        self._precompute_tuples()
+        valid_tuples = self._precompute_tuples()
+        valid_shifts = sorted({t[0] for t in valid_tuples})
+        valid_begins = sorted({t[1] for t in valid_tuples})
+        valid_ends = sorted({t[2] for t in valid_tuples})
+        valid_hours = sorted({t[3] for t in valid_tuples})
 
-        pass
+        E = self.numEmployees
+        D = self.numDays
+        W = self.numWeeks
+
+        print(f"[Tuples]  {len(valid_tuples)} valid tuples precomputed")
+        print(f"[Domains] shifts={valid_shifts}")
+        print(f"[Domains] begins={valid_begins}")
+        print(f"[Domains] ends  ={valid_ends}")
+        print(f"[Domains] hours ={valid_hours}")
+        print(f"[Model] {E} employees x {D} days = {E*D} table constraints")
+
+        # Initialize the solver
+        self.solver = pywrapcp.Solver("EmployeeScheduling")
+
+        shift = [
+            [self.solver.IntVar(valid_shifts, f"s_{e}_{d}") for d in range(D)]
+            for e in range(E)
+        ]
+        begin = [
+            [self.solver.IntVar(valid_begins, f"b_{e}_{d}") for d in range(D)]
+            for e in range(E)
+        ]
+        end = [
+            [self.solver.IntVar(valid_ends, f"e_{e}_{d}") for d in range(D)]
+            for e in range(E)
+        ]
+        hours = [
+            [self.solver.IntVar(valid_hours, f"h_{e}_{d}") for d in range(D)]
+            for e in range(E)
+        ]
+
+        print(f"[Vars] {E*D*4} IntVars created ({E*D} per variable type)")
+
+        # Allowed assignments from the precomputation
+        for e in range(E):
+            for d in range(D):
+                self.solver.Add(
+                    self.solver.AllowedAssignments(
+                        [shift[e][d], begin[e][d], end[e][d], hours[e][d]],
+                        valid_tuples
+                    )
+                )
 
         # TODO: your model goes here
 
@@ -122,12 +166,30 @@ class CPInstance:
 
         # constraints
 
+        # search space
+        all_vars = []
+        for e in range(E):
+            for d in range(D):
+                all_vars.append(shift[e][d])
+        for e in range(E):
+            for d in range(D):
+                all_vars.extend([begin[e][d], end[e][d]])
+
+        db = self.solver.DefaultPhase(all_vars)
+
         # solve
-        db = self.solver.DefaultPhase(...)
+        db = self.solver.DefaultPhase(all_vars)
         self.solver.NewSearch(db)
 
         if self.solver.NextSolution():
-            schedule = ...
+            schedule = [
+                [
+                    (-1, -1) if shift[e][d].Value() == 0
+                    else (begin[e][d].Value(), end[e][d].Value())
+                    for d in range(D)
+                ]
+                for e in range(E)
+            ]
             return True, self.solver.Failures(), schedule
         else:
             return False, self.solver.Failures(), None
