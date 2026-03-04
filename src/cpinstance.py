@@ -7,7 +7,6 @@ import numpy as np
 from ortools.constraint_solver import pywrapcp
 
 
-
 class CPInstance:
     # BUSINESS parameters
     numWeeks: int
@@ -17,7 +16,7 @@ class CPInstance:
     numIntervalsInDay: int
     minDemandDayShift: list[list[int]]
     minDailyOperation: int
-    
+
     # EMPLOYEE parameters
     minConsecutiveWork: int
     maxDailyWork: int
@@ -37,7 +36,7 @@ class CPInstance:
         """
         Reads in a file and populates the instance parameters.
         """
-        params = {} 
+        params = {}
         if not f:
             print("No file provided")
             return
@@ -56,27 +55,54 @@ class CPInstance:
                 elif line.startswith("Employee_"):
                     key, value = line.split(":")
                     params[key] = int(value)
-                
+
         self.numWeeks = params.get("Business_numWeeks")
         self.numDays = params.get("Business_numDays")
         self.numEmployees = params.get("Business_numEmployees")
         self.numShifts = params.get("Business_numShifts")
         self.numIntervalsInDay = params.get("Business_numIntervalsInDay")
-        
+
         raw = params.get("Business_minDemandDayShift", [])
         self.minDemandDayShift = []
         if raw:
             for i in range(0, self.numDays * self.numShifts, self.numShifts):
-                self.minDemandDayShift.append(raw[i : i + self.numShifts])
-                
+                self.minDemandDayShift.append(raw[i: i + self.numShifts])
+
         self.minDailyOperation = params.get("Business_minDailyOperation")
         self.minConsecutiveWork = params.get("Employee_minConsecutiveWork")
         self.maxDailyWork = params.get("Employee_maxDailyWork")
         self.minWeeklyWork = params.get("Employee_minWeeklyWork")
         self.maxWeeklyWork = params.get("Employee_maxWeeklyWork")
-        self.maxConsecutiveNightShift = params.get("Employee_maxConsecutiveNigthShift")
+        self.maxConsecutiveNightShift = params.get(
+            "Employee_maxConsecutiveNigthShift")
         self.maxTotalNightShift = params.get("Employee_maxTotalNigthShift")
 
+    def _precompute_tuples(self):
+        """
+        Pre-compute all the valid work tuples in the form of:
+        (shift, begin, end, hours)
+        """
+
+        SHIFTS = [
+            (0, "Off", 24, 24),  # special marker
+            (1, "Night", 0, 8),
+            (2, "Day", 8, 16),
+            (3, "Evening", 16, 24)
+        ]
+
+        tuples = [(0, 24, 24, 0)]
+
+        for shift_id, _, shift_start, shift_end in SHIFTS:
+            tuples += [
+                (shift_id, begin, end, end - begin)
+                for begin in range(shift_start,
+                                   shift_end - self.minConsecutiveWork + 1)
+                for end in range(begin + self.minConsecutiveWork,
+                                 min(begin + self.maxDailyWork + 1, shift_end + 1))
+            ]
+
+        print(tuples)
+        return tuples
 
     def solve(
         self,
@@ -85,8 +111,11 @@ class CPInstance:
         """
         Employee Scheduling Model 
         """
+
+        self._precompute_tuples()
+
         pass
-    
+
         # TODO: your model goes here
 
         # variables
@@ -102,7 +131,6 @@ class CPInstance:
             return True, self.solver.Failures(), schedule
         else:
             return False, self.solver.Failures(), None
-            
 
     def prettyPrint(self, numEmployees, numDays, sched):
         """
@@ -112,25 +140,27 @@ class CPInstance:
         A "+" refers to a working hour and "." means no work
         The shifts are separated with a "|"
         The days are separated with "||"
-        
+
         This might help you analyze your solutions. 
-        
+
         @param numEmployees the number of employees
         @param numDays the number of days
         @param sched sched[e][d] = (begin, end) hours for employee e on day d
         """
         for e in range(numEmployees):
             print(f"E{e+1}: ", end="")
-            if e < 9: print(" ", end="")
+            if e < 9:
+                print(" ", end="")
             for d in range(numDays):
                 begin = sched[e][d][0]
                 end = sched[e][d][1]
                 for i in range(self.numIntervalsInDay):
-                    if i % 8 == 0: print("|", end="")
+                    if i % 8 == 0:
+                        print("|", end="")
                     if begin != end and i >= begin and i < end:
-                         print("+", end="")
+                        print("+", end="")
                     else:
-                         print(".", end="")
+                        print(".", end="")
                 print("|", end="")
             print(" ")
 
