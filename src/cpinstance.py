@@ -111,6 +111,7 @@ class CPInstance:
         Employee Scheduling Model
         """
 
+        # PRECOMPUTATION
         valid_tuples = self._precompute_tuples()
         valid_shifts = sorted({t[0] for t in valid_tuples})
         valid_begins = sorted({t[1] for t in valid_tuples})
@@ -128,9 +129,10 @@ class CPInstance:
         print(f"[Domains] hours ={valid_hours}")
         print(f"[Model] {E} employees x {D} days = {E*D} table constraints")
 
-        # Initialize the solver
+        # INITIALIZATION
         self.solver = pywrapcp.Solver("EmployeeScheduling")
 
+        # VARIABLES
         shift = [
             [self.solver.IntVar(valid_shifts, f"s_{e}_{d}") for d in range(D)]
             for e in range(E)
@@ -160,13 +162,18 @@ class CPInstance:
                     )
                 )
 
-        # TODO: your model goes here
+        # CONSTRAINTS
 
-        # variables
+        # Training
+        for e in range(E):
+            if D >= 4:  # What to do when < 4
+                self.solver.Add(
+                    self.solver.AllDifferent(
+                        [shift[e][0], shift[e][1], shift[e][2], shift[e][3]]
+                    )
+                )
 
-        # constraints
-
-        # search space
+        # SEARCH SPACE
         all_vars = []
         for e in range(E):
             for d in range(D):
