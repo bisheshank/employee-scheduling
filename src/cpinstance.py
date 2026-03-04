@@ -234,14 +234,6 @@ class CPInstance:
                 self.solver.Sum(is_night) <= self.maxTotalNightShift
             )
 
-            # One night shift is taken by training
-            if D >= 4:
-                self.solver.Add(
-                    self.solver.Sum(
-                        is_night[4:]
-                    ) <= self.maxTotalNightShift - 1
-                )
-
         # NOTE: Symmetry breaking to enforce a canonical lexicographic ordering
         # across employees.
         # This keeps only ONE representative solution per equivalence class.
