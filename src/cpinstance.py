@@ -134,19 +134,31 @@ class CPInstance:
 
         # VARIABLES
         shift = [
-            [self.solver.IntVar(valid_shifts, f"s_{e}_{d}") for d in range(D)]
+            [
+                self.solver.IntVar(valid_shifts, f"s_{e}_{d}")
+                for d in range(D)
+            ]
             for e in range(E)
         ]
         begin = [
-            [self.solver.IntVar(valid_begins, f"b_{e}_{d}") for d in range(D)]
+            [
+                self.solver.IntVar(valid_begins, f"b_{e}_{d}")
+                for d in range(D)
+            ]
             for e in range(E)
         ]
         end = [
-            [self.solver.IntVar(valid_ends, f"e_{e}_{d}") for d in range(D)]
+            [
+                self.solver.IntVar(valid_ends, f"e_{e}_{d}")
+                for d in range(D)
+            ]
             for e in range(E)
         ]
         hours = [
-            [self.solver.IntVar(valid_hours, f"h_{e}_{d}") for d in range(D)]
+            [
+                self.solver.IntVar(valid_hours, f"h_{e}_{d}")
+                for d in range(D)
+            ]
             for e in range(E)
         ]
 
@@ -173,6 +185,63 @@ class CPInstance:
                     )
                 )
 
+        # Demand
+        for d in range(D):
+            for s in range(1, self.numShifts):
+                demand = self.minDemandDayShift[d][s]
+                if demand > 0:
+                    self.solver.Add(
+                        # Count employees working shift s on day d
+                        self.solver.Sum(
+                            [shift[e][d] == s for e in range(E)]) >= demand
+                    )
+
+        # Minimum total hours per day
+        for d in range(D):
+            self.solver.Add(
+                self.solver.Sum(
+                    [hours[e][d] for e in range(E)]) >= self.minDailyOperation
+            )
+
+        # Weekly
+        for e in range(E):
+            for w in range(W):
+                week_start = w * 7
+                week_end = min(week_start + 7, D)
+                week_hours = [hours[e][d] for d in range(week_start, week_end)]
+
+                self.solver.Add(
+                    self.solver.Sum(week_hours) >= self.minWeeklyWork
+                )
+                self.solver.Add(
+                    self.solver.Sum(week_hours) <= self.maxWeeklyWork
+                )
+
+        # TODO: The precomputation effectively removes the need for mindailywork
+        # Is this what we want?
+
+        # Night shifts
+        for e in range(E):
+            is_night = [shift[e][d] == 1 for d in range(D)]
+
+            for d in range(D - 1):
+                self.solver.Add(
+                    is_night[d] + is_night[d + 1]
+                    <= self.maxConsecutiveNightShift
+                )
+
+            self.solver.Add(
+                self.solver.Sum(is_night) <= self.maxTotalNightShift
+            )
+
+            # One night shift is taken by training
+            if D >= 4:
+                self.solver.Add(
+                    self.solver.Sum(
+                        is_night[4:]
+                    ) <= self.maxTotalNightShift - 1
+                )
+
         # SEARCH SPACE
         all_vars = []
         for e in range(E):
@@ -182,11 +251,16 @@ class CPInstance:
             for d in range(D):
                 all_vars.extend([begin[e][d], end[e][d]])
 
-        db = self.solver.DefaultPhase(all_vars)
-
         # solve
         db = self.solver.DefaultPhase(all_vars)
-        self.solver.NewSearch(db)
+
+        if time_limit_seconds:
+            limit = self.solver.TimeLimit(
+                int(time_limit_seconds * 1000)  # s to ms
+            )
+            self.solver.NewSearch(db, limit)
+        else:
+            self.solver.NewSearch(db)
 
         if self.solver.NextSolution():
             schedule = [
