@@ -11,8 +11,8 @@ def main():
     parser.add_argument(
         "--time-limit",
         type=float,
-        default=30,  # 30 seconds for now
-        help="Time limit in seconds (default: 30)",
+        default=None,  # 30 seconds for now
+        help="Time limit in seconds (default: None)",
     )
     args = parser.parse_args()
 
