@@ -85,13 +85,65 @@ class CPInstance:
         """
         Employee Scheduling Model 
         """
-        pass
     
         # TODO: your model goes here
 
-        # variables
+        ### VARIABLES
 
-        # constraints
+        # list of employees shifts they take that day
+        employee_shifts = [[self.solver.IntVar(0, 3)  for _ in range(self.numDays)] for _ in range(self.numEmployees)]
+
+        # list of employee start times
+        # employee_start_times = [[self.solver.IntVar(0, 20) for _ in range(self.numDays)] for _ in range(self.numEmployees)]
+
+        # must work at least 4 consecutive hours per shift (minConsecutiveWork)
+        # employees can't work more than 8 hours a day
+        hours_per_shift = [0] + list(range(self.minConsecutiveWork, self.maxDailyWork + 1))
+
+        # list of employee how many hours they work for that day
+        employee_hours = [[self.solver.IntVar(hours_per_shift) for _ in range(self.numDays)] for _ in range(self.numEmployees)]
+
+        ### CONSTRAINTS
+
+        # employee can only work one shift a day
+
+        for i in range(self.numDays):
+            count1 = self.solver.IntVar(0, self.numDays)
+            count2 = self.solver.IntVar(0, self.numDays)
+            count3 = self.solver.IntVar(0, self.numDays)
+
+            self.solver.Add(self.solver.Distribute(employee_shifts[i], [1, 2, 3], [count1, count2, count3]))
+
+            # min employees needed every day for each shift (minDemandDayShift)
+            self.solver.Add(count1 >= self.minDemandDayShift[i][0])
+            self.solver.Add(count2 >= self.minDemandDayShift[i][1])
+            self.solver.Add(count3 >= self.minDemandDayShift[i][2])
+
+            # min # hours of work carried out a day (minDailyOperation)
+            self.solver.Add(self.solver.Sum(employee_hours[i]) >= self.minDailyOperation)
+
+            for j in range(self.numEmployees):            
+                # total weekly hours must be btwn (minWeeklyWork, maxWeeklyWork) -> change to days (minWeeklyWork / 4, ...)
+                if i % 7 == 0:
+                    self.solver.Add(self.solver.Sum(employee_hours[i-7:i][j]).Between(self.minWeeklyWork, self.maxWeeklyWork))
+
+                # night shifts cant follow each other (maxConsecutiveNightShift)
+                if i != 0:
+                    b = [self.solver.IsEqualCstVar(employee_shifts[i][j], 3) for d 
+                    b2 = self.solver.IsEqualCstVar(employee_shifts[i][j], 3)
+                    self.solver.Add(b1 + b2 <= 1)   # both can't be 1 (i.e. true) at the same time
+
+        for j in range(self.numEmployees):
+            # first 4 days => each employee assigned to unique shift
+            self.solver.Add(self.solver.AllDifferent(employee_shifts[0:4][j]))
+
+            # limit to total # of night shifts across scheduling horizon (maxTotalNightShift)
+            count3 = self.solver.IntVar(0, self.numDays)
+
+            self.solver.Add(self.solver.Count(employee_shifts[:][j], 3, count3))
+            self.solver.Add(count3 <= self.maxTotalNightShift)
+
+
 
         # solve
         db = self.solver.DefaultPhase(...)
