@@ -11,7 +11,7 @@ def main():
     parser.add_argument(
         "--time-limit",
         type=float,
-        default=None,  # 30 seconds for now
+        default=300,  # 30 seconds for now
         help="Time limit in seconds (default: None)",
     )
     args = parser.parse_args()
@@ -29,15 +29,25 @@ def main():
     resultdict = {}
     resultdict["Instance"] = filename
     resultdict["Time"] = round(timer.getTime(), 2)
-    resultdict["Result"] = str(n_fails)
-    resultdict["Solution"] = schedule
-    # feel free to return a different format for schedule from instance.solve
-    # but make sure the Solution matches the format in the handout!
+    resultdict["Result"] = n_fails
 
-    # Pretty prints solution, uncomment to use
-    # if is_solution:
-    #     instance.prettyPrint(instance.numEmployees, instance.numDays, schedule)
-    #     instance.generateVisualizerInput(instance.numEmployees, instance.numDays, schedule)
+    if is_solution:
+        # 1. Flatten the schedule into a space-separated string for the JSON output
+        solution_parts = []
+        for e in range(instance.numEmployees):
+            for d in range(instance.numDays):
+                solution_parts.append(str(schedule[e][d][0]))
+                solution_parts.append(str(schedule[e][d][1]))
+        resultdict["Solution"] = " ".join(solution_parts)
+
+        # 2. Pretty prints solution, uncomment to use
+        # (These still work perfectly because 'schedule' is still the nested list!)
+        # instance.prettyPrint(instance.numEmployees, instance.numDays, schedule)
+        # instance.generateVisualizerInput(instance.numEmployees, instance.numDays, schedule)
+    else:
+        resultdict["Solution"] = ""
+
+    # Print the final JSON exactly on one line
     print(json.dumps(resultdict))
 
 
