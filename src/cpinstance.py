@@ -163,9 +163,34 @@ class CPInstance:
                     )
                 )
 
-        # SYMMETRY BREAKING
+        # # SYMMETRY BREAKING
+        # for e in range(E - 1):
+        #     self.solver.Add(shift[e][0] <= shift[e + 1][0])
+        # ==========================================
+        # 1. REMOVE OR COMMENT OUT YOUR OLD SYMMETRY:
+        # ==========================================
+        # for e in range(E - 1):
+        #     self.solver.Add(shift[e][0] <= shift[e + 1][0])
+
+        # ==========================================
+        # 2. ADD FULL-HORIZON SYMMETRY BREAKING
+        # ==========================================
+        # Force Employee e's entire 21+ day schedule to be lexicographically
+        # less than or equal to Employee e+1's schedule.
         for e in range(E - 1):
-            self.solver.Add(shift[e][0] <= shift[e + 1][0])
+            employee_e_shifts = []
+            employee_next_shifts = []
+
+            # Gather the full horizon of shift variables for both employees
+            for d in range(D):
+                employee_e_shifts.append(shift[e][d])
+                employee_next_shifts.append(shift[e + 1][d])
+
+            # Apply the legacy CP solver's lexicographical constraint
+            self.solver.Add(
+                self.solver.LexicalLessOrEqual(
+                    employee_e_shifts, employee_next_shifts)
+            )
 
         # TRAINING
         training_days = min(D, 4)
@@ -279,6 +304,9 @@ class CPInstance:
             self.solver.Add(self.solver.Sum(is_working) >= min_working_days)
             self.solver.Add(self.solver.Sum(is_working) <= max_working_days)
 
+        # NOTE: For now easy switch
+        is_tight = False
+
         # SEARCH STRATEGY
         all_shift_vars = []
         all_time_vars = []
@@ -292,15 +320,23 @@ class CPInstance:
             for e in range(E):
                 all_time_vars.extend([begin[e][d], end[e][d], hours[e][d]])
 
-        # PHASE 1: Decide Shifts
-        # Use ASSIGN_RANDOM_VALUE with restarts for diverse exploration
-        db_shifts = self.solver.Phase(
-            all_shift_vars,
-            self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
-            self.solver.ASSIGN_RANDOM_VALUE,
-        )
+        # PHASE 1: Decide Shifts dynamically based on tightness
+        if is_tight:
+            # Deterministic: Fail-first, assign smallest values (good for constrained spaces)
+            db_shifts = self.solver.Phase(
+                all_shift_vars,
+                self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
+                self.solver.ASSIGN_MIN_VALUE,
+            )
+        else:
+            # Randomized: Good for exploration in looser problem spaces
+            db_shifts = self.solver.Phase(
+                all_shift_vars,
+                self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
+                self.solver.ASSIGN_RANDOM_VALUE,
+            )
 
-        # PHASE 2: Decide Exact Times - deterministic is fine here (fewer choices)
+        # PHASE 2: Decide Exact Times
         db_times = self.solver.Phase(
             all_time_vars,
             self.solver.CHOOSE_FIRST_UNBOUND,
@@ -310,8 +346,11 @@ class CPInstance:
         db = self.solver.Compose([db_shifts, db_times])
 
         # MONITORS & LIMITS
-        # Luby restarts work with randomization to explore different paths
-        monitors = [self.solver.LubyRestart(100)]
+        monitors = []
+        if not is_tight:
+            # Only use LubyRestarts if we are randomly exploring (loose instances)
+            monitors.append(self.solver.LubyRestart(100))
+
         if time_limit_seconds:
             monitors.append(self.solver.TimeLimit(
                 int(time_limit_seconds * 1000)))
