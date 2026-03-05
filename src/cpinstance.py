@@ -86,120 +86,129 @@ class CPInstance:
         Employee Scheduling Model 
         """
     
+        from itertools import permutations
+
         solver = self.solver
         E  = self.numEmployees
         D  = self.numDays
         W  = self.numWeeks
-        S  = self.numShifts
+        S  = self.numShifts   # 4: off=0, night=1, day=2, evening=3
 
         SHIFT_START = [0, 0, 8, 16]
         SHIFT_END   = [0, 8, 16, 24]
-        minC = self.minConsecutiveWork
-        maxD = self.maxDailyWork
+        minC     = self.minConsecutiveWork
+        maxD     = self.maxDailyWork
         TRAINING = min(4, D)
 
-        # ── PRECOMPUTE IDX TABLE ─────────────────────────────────────────
-        table = [(0, 0)]
+        # ── PRECOMPUTE POST-TRAINING TABLE ───────────────────────────────
+        # Valid (shift, hours) pairs for post-training days.
+        # Off last so ASSIGN_MIN_VALUE tries work shifts first.
+        table = []
         for k in range(1, S):
-            window = SHIFT_END[k] - SHIFT_START[k]
+            window = SHIFT_END[k] - SHIFT_START[k]  # always 8
             for h in range(minC, min(maxD, window) + 1):
                 table.append((k, h))
+        table.append((0, 0))  # off last
 
-        N         = len(table)
-        tbl_shift = [row[0] for row in table]
-        tbl_hours = [row[1] for row in table]
+        N            = len(table)
+        tbl_shift    = [row[0] for row in table]
+        tbl_hours    = [row[1] for row in table]
         tbl_is_night = [1 if row[0] == 1 else 0 for row in table]
-        tbl_is_k = {
+        tbl_is_k     = {
             k: [1 if row[0] == k else 0 for row in table]
             for k in range(1, S)
         }
 
-        # ── PRECOMPUTE ALL 4! TRAINING PERMUTATIONS ──────────────────────
-        # Each permutation is a list of 4 shift values [s0, s1, s2, s3]
-        # where each of {0,1,2,3} appears exactly once.
-        from itertools import permutations
-        all_perms = list(permutations(range(S)))  # 24 permutations
-        P = len(all_perms)
-        # perm_shift[p][d] = shift value for permutation p on training day d
+        # ── PRECOMPUTE TRAINING PERMUTATIONS ────────────────────────────
+        # 4! = 24 permutations of shift values {0,1,2,3}.
+        # perm_shift[p][d] = shift assigned on training day d under permutation p.
+        all_perms  = list(permutations(range(S)))
+        P          = len(all_perms)                          # 24
         perm_shift = [[all_perms[p][d] for d in range(TRAINING)] for p in range(P)]
 
+        # Precompute per-shift, per-day boolean lookup over permutations:
+        # has_k_on_d[k][d][p] = 1 iff permutation p assigns shift k on training day d
+        has_k_on_d = {
+            k: [[1 if perm_shift[p][d] == k else 0 for p in range(P)]
+                for d in range(TRAINING)]
+            for k in range(1, S)
+        }
+        # is_night_on_d[d][p] = 1 iff permutation p assigns night on training day d
+        is_night_on_d = [
+            [1 if perm_shift[p][d] == 1 else 0 for p in range(P)]
+            for d in range(TRAINING)
+        ]
+
         # ── VARIABLES ────────────────────────────────────────────────────
-        # Training: one permutation index per employee (0..23)
+
+        # Training: one permutation index per employee (domain 0..23)
         perm = [solver.IntVar(0, P - 1, f"perm_{e}") for e in range(E)]
 
-        # Post-training days: one idx per (employee, day)
+        # Post-training: one table index per (employee, post-training day)
         idx = [
-            [solver.IntVar(0, N - 1, f"idx_{e}_{d}") for d in range(TRAINING, D)]
+            [solver.IntVar(0, N - 1, f"idx_{e}_{d}") for d in range(D - TRAINING)]
             for e in range(E)
         ]
 
-        # Training shift for each (employee, training_day) derived from perm via Element
-        # perm_shift[p][d] for employee e on day d = Element(perm_shift_col[d], perm[e])
+        # Training hours: free within [0, maxD], constrained below by shift type
+        train_hours = [
+            [solver.IntVar(0, maxD, f"th_{e}_{d}") for d in range(TRAINING)]
+            for e in range(E)
+        ]
+
+        # ── DERIVED EXPRESSIONS (no search variables) ────────────────────
+
+        # Training shift on day d for employee e = Element lookup into perm_shift column
         train_shift = [
             [solver.Element([perm_shift[p][d] for p in range(P)], perm[e])
             for d in range(TRAINING)]
             for e in range(E)
         ]
 
-        # Derived expressions for post-training days
-        post_shift    = [[solver.Element(tbl_shift,    idx[e][d - TRAINING]) for d in range(TRAINING, D)] for e in range(E)]
-        post_hours    = [[solver.Element(tbl_hours,    idx[e][d - TRAINING]) for d in range(TRAINING, D)] for e in range(E)]
-        post_is_night = [[solver.Element(tbl_is_night, idx[e][d - TRAINING]) for d in range(TRAINING, D)] for e in range(E)]
-        post_is_k = {
-            k: [[solver.Element(tbl_is_k[k], idx[e][d - TRAINING]) for d in range(TRAINING, D)] for e in range(E)]
-            for k in range(1, S)
-        }
-
-        # Unified accessors across all days
-        def get_shift(e, d):
-            return train_shift[e][d] if d < TRAINING else post_shift[e][d - TRAINING]
-
-        def get_hours(e, d):
-            # Training hours: if off (shift==0) hours=0, else need a variable
-            # Use Element over a per-perm hours table — but hours aren't fixed by perm.
-            # Use a separate hours var for training days.
-            return train_hours[e][d] if d < TRAINING else post_hours[e][d - TRAINING]
-
-        def get_is_night(e, d):
-            if d < TRAINING:
-                # shift==1 iff perm assigns night on day d
-                night_by_perm = [1 if perm_shift[p][d] == 1 else 0 for p in range(P)]
-                return solver.Element(night_by_perm, perm[e])
-            return post_is_night[e][d - TRAINING]
-
-        # Training hours variables (shift is fixed by perm, hours still free within shift)
-        train_hours = [
-            [solver.IntVar(0, maxD, f"th_{e}_{d}") for d in range(TRAINING)]
+        # Training night indicator: 1 iff perm assigns night on day d
+        train_is_night = [
+            [solver.Element(is_night_on_d[d], perm[e]) for d in range(TRAINING)]
             for e in range(E)
         ]
 
+        # Post-training derived expressions
+        post_hours    = [[solver.Element(tbl_hours,    idx[e][d]) for d in range(D - TRAINING)] for e in range(E)]
+        post_is_night = [[solver.Element(tbl_is_night, idx[e][d]) for d in range(D - TRAINING)] for e in range(E)]
+        post_is_k     = {
+            k: [[solver.Element(tbl_is_k[k], idx[e][d]) for d in range(D - TRAINING)] for e in range(E)]
+            for k in range(1, S)
+        }
+
         # ── TRAINING HOURS CONSTRAINTS ───────────────────────────────────
+        # If shift==0 (off): hours=0. If working: hours in [minC, maxD].
+        # is_off = 1 iff perm assigns off on day d.
+        is_off_on_d = [
+            [1 if perm_shift[p][d] == 0 else 0 for p in range(P)]
+            for d in range(TRAINING)
+        ]
         for e in range(E):
             for d in range(TRAINING):
-                h  = train_hours[e][d]
-                ts = train_shift[e][d]
-                # is_off_train = 1 iff shift == 0
-                is_off_t = solver.IsEqualCstVar(ts, 0)
-                solver.Add(h <= maxD * (1 - is_off_t))
-                solver.Add(h >= minC - maxD * is_off_t)
-                solver.Add(h <= maxD)
+                h      = train_hours[e][d]
+                is_off = solver.Element(is_off_on_d[d], perm[e])
+                solver.Add(h <= maxD * (1 - is_off))       # off  -> h = 0
+                solver.Add(h >= minC  - maxD * is_off)     # work -> h >= minC
 
-        # ── DEMAND ON TRAINING DAYS (fires immediately after perm assigned) ──
+        # ── DEMAND CONSTRAINTS ───────────────────────────────────────────
+        # Training days: fires immediately when perm[e] is assigned.
         for d in range(TRAINING):
             for k in range(1, S):
-                # count of employees whose perm assigns shift k on day d
-                has_k_on_d = [1 if perm_shift[p][d] == k else 0 for p in range(P)]
                 solver.Add(
-                    solver.Sum([solver.Element(has_k_on_d, perm[e]) for e in range(E)])
-                    >= self.minDemandDayShift[d][k]
+                    solver.Sum([
+                        solver.Element(has_k_on_d[k][d], perm[e]) for e in range(E)
+                    ]) >= self.minDemandDayShift[d][k]
                 )
 
-        # ── POST-TRAINING DEMAND ─────────────────────────────────────────
-        for d in range(TRAINING, D):
+        # Post-training days
+        for d in range(D - TRAINING):
             for k in range(1, S):
                 solver.Add(
-                    solver.Sum([post_is_k[k][e][d - TRAINING] for e in range(E)])
-                    >= self.minDemandDayShift[d][k]
+                    solver.Sum([post_is_k[k][e][d] for e in range(E)])
+                    >= self.minDemandDayShift[TRAINING + d][k]
                 )
 
         # ── WEEKLY HOURS ─────────────────────────────────────────────────
@@ -207,7 +216,8 @@ class CPInstance:
             for w in range(W):
                 week_days = range(w * 7, min((w + 1) * 7, D))
                 wh = solver.Sum([
-                    train_hours[e][d] if d < TRAINING else post_hours[e][d - TRAINING]
+                    train_hours[e][d]          if d < TRAINING
+                    else post_hours[e][d - TRAINING]
                     for d in week_days
                 ])
                 solver.Add(wh >= self.minWeeklyWork)
@@ -215,44 +225,58 @@ class CPInstance:
 
         # ── NIGHT SHIFT CONSTRAINTS ──────────────────────────────────────
         for e in range(E):
-            all_is_night = [get_is_night(e, d) for d in range(D)]
+            all_is_night = (
+                [train_is_night[e][d] for d in range(TRAINING)] +
+                [post_is_night[e][d]  for d in range(D - TRAINING)]
+            )
 
-            # Total nights
+            # Total nights across horizon
             solver.Add(solver.Sum(all_is_night) <= self.maxTotalNightShift)
 
-            # No consecutive nights
+            # No two consecutive nights
             for d in range(D - self.maxConsecutiveNightShift):
                 solver.Add(
-                    solver.Sum(all_is_night[d:d + self.maxConsecutiveNightShift + 1])
+                    solver.Sum(all_is_night[d : d + self.maxConsecutiveNightShift + 1])
                     <= self.maxConsecutiveNightShift
                 )
 
         # ── DAILY OPERATION ──────────────────────────────────────────────
         for d in range(D):
             day_hours = solver.Sum([
-                train_hours[e][d] if d < TRAINING else post_hours[e][d - TRAINING]
+                train_hours[e][d]          if d < TRAINING
+                else post_hours[e][d - TRAINING]
                 for e in range(E)
             ])
             solver.Add(day_hours >= self.minDailyOperation)
 
         # ── SYMMETRY BREAKING ────────────────────────────────────────────
+        # Employees are symmetric w.r.t. permutation choice, so enforce
+        # lexicographic order on perm values to eliminate duplicate solutions.
+        # Unlike shift-based symmetry breaking, perm ordering does not interact
+        # with AllDifferent (there is none here) and is safe to apply.
         for e in range(E - 1):
             solver.Add(perm[e] <= perm[e + 1])
 
         # ── SEARCH ───────────────────────────────────────────────────────
-        # Phase 1: assign training permutations — immediately fires demand
-        #          on all 4 training days simultaneously
-        # Phase 2: assign post-training idx vars
-        # Phase 3: assign training hours (nearly free once shifts known)
+        # Phase 1: assign perm vars — immediately fires training demand on
+        #          all 4 days simultaneously (vs. 3*E incremental assignments).
+        # Phase 2: assign post-training idx vars column-major so per-day
+        #          demand constraints propagate across all employees at once.
+        # Phase 3: fill training hours (nearly determined after perm is fixed).
         post_idx_vars   = [idx[e][d] for d in range(D - TRAINING) for e in range(E)]
         train_hour_vars = [train_hours[e][d] for e in range(E) for d in range(TRAINING)]
 
-        phase1 = solver.Phase(perm, solver.CHOOSE_MIN_SIZE_LOWEST_MIN, solver.ASSIGN_MIN_VALUE)
-        phase2 = solver.Phase(post_idx_vars, solver.CHOOSE_MIN_SIZE_LOWEST_MIN, solver.ASSIGN_CENTER_VALUE)
-        phase3 = solver.Phase(train_hour_vars, solver.CHOOSE_FIRST_UNBOUND, solver.ASSIGN_MAX_VALUE)
-        db = solver.Compose([phase1, phase2, phase3])
+        phase1 = solver.Phase(perm,           solver.CHOOSE_MIN_SIZE_LOWEST_MIN, solver.ASSIGN_MIN_VALUE)
+        phase2 = solver.Phase(post_idx_vars,  solver.CHOOSE_MIN_SIZE_LOWEST_MIN, solver.ASSIGN_CENTER_VALUE)
+        phase3 = solver.Phase(train_hour_vars,solver.CHOOSE_FIRST_UNBOUND,       solver.ASSIGN_MAX_VALUE)
+        db     = solver.Compose([phase1, phase2, phase3])
 
-        monitors = []
+        # ── MONITORS ─────────────────────────────────────────────────────
+        # Luby restarts: geometrically growing failure budget
+        #   1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8, ... (x scale)
+        # scale=100 lets the solver explore enough local structure before
+        # restarting, while preventing exhaustive descent into dead subtrees.
+        monitors = [solver.LubyRestart(100)]
         if time_limit_seconds is not None:
             monitors.append(solver.TimeLimit(int(time_limit_seconds * 1000)))
         solver.NewSearch(db, monitors)
@@ -261,18 +285,15 @@ class CPInstance:
             sched = []
             for e in range(E):
                 row = []
-                p = perm[e].Value()  # integer 0..23 — the chosen permutation
+                p = perm[e].Value()
                 for d in range(D):
                     if d < TRAINING:
-                        k = perm_shift[p][d]              # read shift from table, not from expr
-                        h = train_hours[e][d].Value()     # plain IntVar, has .Value()
+                        k = perm_shift[p][d]
+                        h = train_hours[e][d].Value()
                     else:
-                        i = idx[e][d - TRAINING].Value()  # plain IntVar, has .Value()
+                        i = idx[e][d - TRAINING].Value()
                         k, h = tbl_shift[i], tbl_hours[i]
-                    if k == 0:
-                        row.append((-1, -1))
-                    else:
-                        row.append((SHIFT_START[k], SHIFT_START[k] + h))
+                    row.append((-1, -1) if k == 0 else (SHIFT_START[k], SHIFT_START[k] + h))
                 sched.append(row)
             solver.EndSearch()
             return True, solver.Failures(), sched
