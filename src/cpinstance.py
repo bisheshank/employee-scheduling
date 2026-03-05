@@ -182,9 +182,7 @@ class CPInstance:
         # DEMAND
         for d in range(D):
             for s in self.WORKING_SHIFTS:
-                # Subtract 1 because shift IDs (1,2,3) are 1-indexed
-                # but the demand list is 0-indexed.
-                demand = self.minDemandDayShift[d][s - 1]
+                demand = self.minDemandDayShift[d][s]
                 if demand > 0:
                     self.solver.Add(
                         self.solver.Sum(
@@ -269,8 +267,7 @@ class CPInstance:
             for d in range(D):
                 all_time_vars.extend([begin[e][d], end[e][d], hours[e][d]])
 
-        # PHASE 1: Decide Shifts using ASSIGN_MIN_VALUE
-        # Prefers 1, 2, 3 over OFF=4
+        # PHASE 1: Decide Shifts
         db_shifts = self.solver.Phase(
             all_shift_vars,
             self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
@@ -287,7 +284,7 @@ class CPInstance:
         db = self.solver.Compose([db_shifts, db_times])
 
         # MONITORS & LIMITS
-        monitors = [self.solver.LubyRestart(800)]
+        monitors = [self.solver.LubyRestart(1000)]
         if time_limit_seconds:
             monitors.append(self.solver.TimeLimit(
                 int(time_limit_seconds * 1000)))
