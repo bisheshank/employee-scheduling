@@ -31,7 +31,7 @@ class CPInstance:
 
     def __init__(self, filename: str):
         self.load_from_file(filename)
-        self.solver = None
+        self.solver = pywrapcp.Solver('employee_scheduling')
 
     def load_from_file(self, f: str):
         """
@@ -91,17 +91,17 @@ class CPInstance:
         ### VARIABLES
 
         # list of employees shifts they take that day
-        employee_shifts = [[self.solver.IntVar(0, 3)  for _ in range(self.numDays)] for _ in range(self.numEmployees)]
+        employee_shifts = [[self.solver.IntVar(0, 3) for _ in range(self.numEmployees)] for _ in range(self.numDays)]
 
         # list of employee start times
         # employee_start_times = [[self.solver.IntVar(0, 20) for _ in range(self.numDays)] for _ in range(self.numEmployees)]
 
         # must work at least 4 consecutive hours per shift (minConsecutiveWork)
-        # employees can't work more than 8 hours a day
+        # employees can't work more than 8 hours a day [0, 4, 5, 6, 7, 8]
         hours_per_shift = [0] + list(range(self.minConsecutiveWork, self.maxDailyWork + 1))
 
         # list of employee how many hours they work for that day
-        employee_hours = [[self.solver.IntVar(hours_per_shift) for _ in range(self.numDays)] for _ in range(self.numEmployees)]
+        employee_hours = [[self.solver.IntVar(hours_per_shift) for _ in range(self.numEmployees)] for _ in range(self.numDays)] 
 
         ### CONSTRAINTS
 
@@ -115,42 +115,76 @@ class CPInstance:
             self.solver.Add(self.solver.Distribute(employee_shifts[i], [1, 2, 3], [count1, count2, count3]))
 
             # min employees needed every day for each shift (minDemandDayShift)
-            self.solver.Add(count1 >= self.minDemandDayShift[i][0])
-            self.solver.Add(count2 >= self.minDemandDayShift[i][1])
-            self.solver.Add(count3 >= self.minDemandDayShift[i][2])
+            self.solver.Add(count1 >= self.minDemandDayShift[i][1])
+            self.solver.Add(count2 >= self.minDemandDayShift[i][2])
+            self.solver.Add(count3 >= self.minDemandDayShift[i][3])
 
             # min # hours of work carried out a day (minDailyOperation)
             self.solver.Add(self.solver.Sum(employee_hours[i]) >= self.minDailyOperation)
 
-            for j in range(self.numEmployees):            
-                # total weekly hours must be btwn (minWeeklyWork, maxWeeklyWork) -> change to days (minWeeklyWork / 4, ...)
-                if i % 7 == 0:
-                    self.solver.Add(self.solver.Sum(employee_hours[i-7:i][j]).Between(self.minWeeklyWork, self.maxWeeklyWork))
+            for j in range(self.numEmployees):
+                # total weekly hours must be btwn (minWeeklyWork, maxWeeklyWork)
+                # if i % 7 == 0 and i >= 7:
+                #     weekly_sum = self.solver.Sum([employee_hours[d][j] for d in range(i-7, i)])
+                #     self.solver.Add(weekly_sum >= self.minWeeklyWork)
+                #     self.solver.Add(weekly_sum <= self.maxWeeklyWork)
 
-                # night shifts cant follow each other (maxConsecutiveNightShift)
-                if i != 0:
-                    b = [self.solver.IsEqualCstVar(employee_shifts[i][j], 3) for d 
-                    b2 = self.solver.IsEqualCstVar(employee_shifts[i][j], 3)
-                    self.solver.Add(b1 + b2 <= 1)   # both can't be 1 (i.e. true) at the same time
+                is_zero_shift = self.solver.IsEqualCstVar(employee_shifts[i][j], 0)
+                is_zero_hours = self.solver.IsEqualCstVar(employee_hours[i][j], 0)
+
+                self.solver.Add(self.solver.Max(employee_shifts[i][j], 0) * employee_hours[i][j] >= employee_shifts[i][j] * self.minConsecutiveWork)
+
+                self.solver.Add(is_zero_shift == is_zero_hours)
 
         for j in range(self.numEmployees):
             # first 4 days => each employee assigned to unique shift
-            self.solver.Add(self.solver.AllDifferent(employee_shifts[0:4][j]))
+            self.solver.Add(self.solver.AllDifferent([employee_shifts[i][j] for i in range(min(self.numDays, 4))]))
 
             # limit to total # of night shifts across scheduling horizon (maxTotalNightShift)
             count3 = self.solver.IntVar(0, self.numDays)
 
-            self.solver.Add(self.solver.Count(employee_shifts[:][j], 3, count3))
+            self.solver.Add(self.solver.Count([employee_shifts[i][j] for i in range(self.numDays)], 3, count3))
             self.solver.Add(count3 <= self.maxTotalNightShift)
+
+            # total weekly hours must be btwn (minWeeklyWork, maxWeeklyWork)
+            for week in range(self.numWeeks):
+                start = week * 7
+                end = start + 7
+                if end <= self.numDays:
+                    weekly_sum = self.solver.Sum([employee_hours[d][j] for d in range(start, end)])
+                    self.solver.Add(weekly_sum >= self.minWeeklyWork)
+                    self.solver.Add(weekly_sum <= self.maxWeeklyWork)
+
+            # night shifts cant follow each other (maxConsecutiveNightShift)
+            for i in range(self.numDays - self.maxConsecutiveNightShift):
+                night_shift_bools = [
+                    self.solver.IsEqualCstVar(employee_shifts[i + k][j], 1)
+                    for k in range(self.maxConsecutiveNightShift + 1)
+                ]
+                self.solver.Add(self.solver.Sum(night_shift_bools) <= self.maxConsecutiveNightShift)
 
 
 
         # solve
-        db = self.solver.DefaultPhase(...)
+        all_vars = (
+            [employee_shifts[d][e] for d in range(self.numDays) for e in range(self.numEmployees)] +
+            [employee_hours[d][e] for d in range(self.numDays) for e in range(self.numEmployees)]
+        )
+        db = self.solver.DefaultPhase(all_vars)
         self.solver.NewSearch(db)
 
         if self.solver.NextSolution():
-            schedule = ...
+            start_times = [-1, 0, 8, 16]
+            schedule = [[[-1, -1] for _ in range(self.numDays)] for _ in range(self.numEmployees)]
+
+            for d in range(self.numDays):
+                for e in range(self.numEmployees):
+                    if employee_shifts[d][e].Value() == 0:
+                        continue
+                    
+                    schedule[e][d][0] = start_times[employee_shifts[d][e].Value()]
+                    schedule[e][d][1] = schedule[e][d][0] + employee_hours[d][e].Value()
+
             return True, self.solver.Failures(), schedule
         else:
             return False, self.solver.Failures(), None
