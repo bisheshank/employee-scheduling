@@ -28,7 +28,7 @@ def main():
 
     resultdict = {}
     resultdict["Instance"] = filename
-    resultdict["Time"] = timer.getTime()
+    resultdict["Time"] = round(timer.getTime(), 2)
     resultdict["Result"] = str(n_fails)
     resultdict["Solution"] = schedule
     # feel free to return a different format for schedule from instance.solve
