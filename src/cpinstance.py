@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import sys
 import json
+from collections import defaultdict
 from typing import Optional, List, Tuple
 
 from ortools.constraint_solver import pywrapcp
@@ -360,21 +361,56 @@ class CPInstance:
         self.solver.NewSearch(db, monitors)
 
         if self.solver.NextSolution():
-            # POST-COMPUTATION: Derive begin/end from shift and hours
+            # POST-COMPUTATION: Distribute start times across shifts
+            SHIFT_BOUNDS = {1: (0, 8), 2: (8, 16), 3: (16, 24)}
+
+            # Step 1: Extract raw solution
+            raw_solution = {}
+            for e in range(E):
+                for d in range(D):
+                    raw_solution[(e, d)] = (shift[e][d].Value(), hours[e][d].Value())
+
+            # Step 2: Group by (day, shift)
+            groups = defaultdict(list)
+            for (e, d), (shift_val, hours_val) in raw_solution.items():
+                if shift_val != self.OFF_SHIFT:
+                    groups[(d, shift_val)].append((e, hours_val))
+
+            # Step 3: Compute distributed start times
+            begin_times = {}
+            for (d, shift_val), employees in groups.items():
+                shift_start, shift_end = SHIFT_BOUNDS[shift_val]
+                n = len(employees)
+
+                # Sort by hours worked (shorter shifts get later indices)
+                employees_sorted = sorted(employees, key=lambda x: x[1])
+
+                for i, (e, hours_val) in enumerate(employees_sorted):
+                    max_start = shift_end - hours_val
+                    range_size = max_start - shift_start
+
+                    if n > 1 and range_size > 0:
+                        offset = (i * range_size) // (n - 1)
+                    else:
+                        offset = 0
+
+                    begin_times[(e, d)] = shift_start + offset
+
+            # Step 4: Build final schedule
             schedule = []
             for e in range(E):
                 emp_schedule = []
                 for d in range(D):
-                    shift_val = shift[e][d].Value()
-                    hours_val = hours[e][d].Value()
+                    shift_val, hours_val = raw_solution[(e, d)]
 
                     if shift_val == self.OFF_SHIFT:
                         emp_schedule.append((-1, -1))
                     else:
-                        begin_val = SHIFT_START[shift_val]
+                        begin_val = begin_times[(e, d)]
                         end_val = begin_val + hours_val
                         emp_schedule.append((begin_val, end_val))
                 schedule.append(emp_schedule)
+
             return True, self.solver.Failures(), schedule
         else:
             return False, self.solver.Failures(), None
