@@ -43,7 +43,8 @@ def main():
         # 2. Pretty prints solution, uncomment to use
         # (These still work perfectly because 'schedule' is still the nested list!)
         # instance.prettyPrint(instance.numEmployees, instance.numDays, schedule)
-        # instance.generateVisualizerInput(instance.numEmployees, instance.numDays, schedule)
+        # instance.generateVisualizerInput(
+        #     instance.numEmployees, instance.numDays, schedule)
     else:
         resultdict["Solution"] = ""
 

@@ -157,3 +157,79 @@ src/
 inputs/
   *.sched        - Problem instances
 ```
+
+## Constraint Flags
+
+The model uses a flag-based system for incremental testing of constraints. All flags are module-level constants at the top of `cpinstance.py`. This lets you easily toggle constraints on/off to see which ones impact solver performance or cause infeasibility.
+
+### Core Constraints
+
+These are required by the problem spec:
+
+| Flag | Description |
+|------|-------------|
+| `ENABLE_TABLE_CONSTRAINTS` | Links shift and hours via valid (shift, hours) pairs |
+| `ENABLE_TRAINING` | AllDifferent for first 4 days (each employee experiences all shifts) |
+| `ENABLE_DEMAND` | Distribute constraint for minDemandDayShift |
+| `ENABLE_MIN_DAILY_OPERATION` | Sum of hours per day >= minDailyOperation |
+| `ENABLE_WEEKLY_HOURS` | BetweenCt for min/max weekly hours |
+| `ENABLE_NIGHT_CONSECUTIVE` | Sliding window for maxConsecutiveNightShift |
+| `ENABLE_NIGHT_TOTAL` | Total night shift limit per employee |
+
+### Redundant Constraints
+
+These are technically implied by other constraints but can strengthen propagation:
+
+| Flag | Description |
+|------|-------------|
+| `ENABLE_SYMMETRY_BREAKING` | Lexicographic ordering of employee schedules |
+| `ENABLE_REDUNDANT_MAX_OFF` | Upper bound on off-shifts per day (derived from demand) |
+| `ENABLE_TOTAL_HORIZON` | Global min/max hours over entire scheduling period |
+| `ENABLE_IMPLIED_WORKING_DAYS` | Min/max working days per employee |
+
+### Search Strategy Flags
+
+| Flag | Description |
+|------|-------------|
+| `IS_DEFAULT` | Use DefaultPhase search (vs custom Phase) |
+| `IS_TIGHT` | Deterministic fail-first search (vs randomized exploration) |
+| `IS_RESTART` | Enable LubyRestart for search diversification |
+
+### Ethical/Employee-Friendly Flags
+
+These control whether the model favors employee welfare vs productivity:
+
+| Flag | Description |
+|------|-------------|
+| `ETHICAL_OFF_FIRST` | When True, OFF_SHIFT=0 so off-shifts are tried first with ASSIGN_MIN_VALUE. Gives employees more rest days. When False, OFF_SHIFT=4 so working shifts are preferred. |
+| `ENABLE_POST_PROCESS` | When True, start times are evenly distributed within shifts for better coverage. When False, everyone starts at shift start time. |
+
+Note on search performance: `ETHICAL_OFF_FIRST = False` can be faster because working shifts are more constrained (they affect demand, hours, night limits). Trying them first triggers more propagation and prunes the tree earlier. Off shifts are "free" - they don't constrain much - so trying them first means less early pruning. It's a trade-off between search speed and employee-friendly schedules.
+
+`ENABLE_POST_PROCESS` is purely cosmetic for the solver (happens after search) but produces more realistic schedules where employees have staggered start times instead of everyone clocking in at once.
+
+### Example Usage
+
+To test which redundant constraints actually help:
+
+```python
+# Disable all redundant constraints
+ENABLE_SYMMETRY_BREAKING = False
+ENABLE_REDUNDANT_MAX_OFF = False
+ENABLE_TOTAL_HORIZON = False
+ENABLE_IMPLIED_WORKING_DAYS = False
+```
+
+Then run and compare the `Result` (failure count) against the baseline.
+
+To compare business-first vs employee-first scheduling:
+
+```python
+# Business-first (default)
+ETHICAL_OFF_FIRST = False
+ENABLE_POST_PROCESS = True
+
+# Employee-first
+ETHICAL_OFF_FIRST = True
+ENABLE_POST_PROCESS = True
+```

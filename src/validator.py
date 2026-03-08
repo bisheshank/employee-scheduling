@@ -140,7 +140,7 @@ def validate_solution(
         for d in range(num_days):
             start_idx = d * num_shifts
             # Skip off (index 0), take night/day/evening (indices 1,2,3)
-            day_demand = min_demand_raw[start_idx + 1 : start_idx + 4]
+            day_demand = min_demand_raw[start_idx + 1: start_idx + 4]
             min_demand.append(day_demand)
 
     # Parse solution
@@ -180,7 +180,8 @@ def validate_solution(
 
                 if end <= begin:
                     result.add_error(
-                        f"E{e + 1} D{d + 1}: End ({end}) must be > begin ({begin})"
+                        f"E{e + 1} D{d +
+                                     1}: End ({end}) must be > begin ({begin})"
                     )
                     continue
 
@@ -189,20 +190,23 @@ def validate_solution(
 
                 if shift == -1:
                     result.add_error(
-                        f"E{e + 1} D{d + 1}: Times ({begin}, {end}) don't fit any valid shift"
+                        f"E{e + 1} D{d +
+                                     1}: Times ({begin}, {end}) don't fit any valid shift"
                     )
                     continue
 
                 # 2. Min consecutive work
                 if hours < min_consecutive_work:
                     result.add_error(
-                        f"E{e + 1} D{d + 1}: Hours worked ({hours}) < minConsecutiveWork ({min_consecutive_work})"
+                        f"E{e + 1} D{d + 1}: Hours worked ({hours}) < minConsecutiveWork ({
+                            min_consecutive_work})"
                     )
 
                 # 3. Max daily work
                 if hours > max_daily_work:
                     result.add_error(
-                        f"E{e + 1} D{d + 1}: Hours worked ({hours}) > maxDailyWork ({max_daily_work})"
+                        f"E{e + 1} D{d +
+                                     1}: Hours worked ({hours}) > maxDailyWork ({max_daily_work})"
                     )
 
                 total_hours += hours
@@ -222,13 +226,15 @@ def validate_solution(
         # 8. Max consecutive night shifts
         if max_consec_night_seen > max_consecutive_night:
             result.add_error(
-                f"E{e + 1}: Consecutive night shifts ({max_consec_night_seen}) > maxConsecutiveNightShift ({max_consecutive_night})"
+                f"E{e + 1}: Consecutive night shifts ({
+                    max_consec_night_seen}) > maxConsecutiveNightShift ({max_consecutive_night})"
             )
 
         # 9. Max total night shifts
         if employee_night_count > max_total_night:
             result.add_error(
-                f"E{e + 1}: Total night shifts ({employee_night_count}) > maxTotalNightShift ({max_total_night})"
+                f"E{e + 1}: Total night shifts ({employee_night_count}) > maxTotalNightShift ({
+                    max_total_night})"
             )
 
     # 4. Weekly hours constraints
@@ -249,11 +255,13 @@ def validate_solution(
 
             if week_hours < min_weekly_work:
                 result.add_error(
-                    f"E{e + 1} Week{w + 1}: Hours ({week_hours}) < minWeeklyWork ({min_weekly_work})"
+                    f"E{e + 1} Week{w +
+                                    1}: Hours ({week_hours}) < minWeeklyWork ({min_weekly_work})"
                 )
             if week_hours > max_weekly_work:
                 result.add_error(
-                    f"E{e + 1} Week{w + 1}: Hours ({week_hours}) > maxWeeklyWork ({max_weekly_work})"
+                    f"E{e + 1} Week{w +
+                                    1}: Hours ({week_hours}) > maxWeeklyWork ({max_weekly_work})"
                 )
 
     # 5. Min demand per day per shift
@@ -271,7 +279,8 @@ def validate_solution(
                 shift_id = s_idx + 1  # 1=night, 2=day, 3=evening
                 if demand > 0 and shift_workers.get(shift_id, 0) < demand:
                     result.add_error(
-                        f"D{d + 1} Shift{shift_id}: Workers ({shift_workers.get(shift_id, 0)}) < demand ({demand})"
+                        f"D{d + 1} Shift{shift_id}: Workers ({shift_workers.get(
+                            shift_id, 0)}) < demand ({demand})"
                     )
 
     # 6. Min daily operation
@@ -284,7 +293,8 @@ def validate_solution(
 
         if day_hours < min_daily_operation:
             result.add_error(
-                f"D{d + 1}: Total hours ({day_hours}) < minDailyOperation ({min_daily_operation})"
+                f"D{d + 1}: Total hours ({day_hours}) < minDailyOperation ({
+                    min_daily_operation})"
             )
 
     # 7. Training requirement: unique shifts in first 4 days
@@ -361,7 +371,8 @@ def validate_results_log(results_file: str, inputs_dir: str, verbose: bool = Tru
                 results.append((instance_name, None, "Input not found"))
                 continue
 
-            validation = validate_solution(str(instance_file), solution, verbose)
+            validation = validate_solution(
+                str(instance_file), solution, verbose)
 
             print(f"\n{'=' * 60}")
             print(f"Instance: {instance_name}")
@@ -377,7 +388,8 @@ def validate_results_log(results_file: str, inputs_dir: str, verbose: bool = Tru
                 for err in validation.errors[:10]:  # Limit to first 10
                     print(f"  - {err}")
                 if len(validation.errors) > 10:
-                    print(f"  ... and {len(validation.errors) - 10} more errors")
+                    print(f"  ... and {
+                          len(validation.errors) - 10} more errors")
 
             if validation.warnings and verbose:
                 print(f"\nWarnings:")
@@ -386,12 +398,15 @@ def validate_results_log(results_file: str, inputs_dir: str, verbose: bool = Tru
 
             if verbose:
                 print(f"\nStatistics:")
-                print(f"  Total hours worked: {validation.stats.get('total_hours', 0)}")
+                print(f"  Total hours worked: {
+                      validation.stats.get('total_hours', 0)}")
                 print(
-                    f"  Avg hours/employee/day: {validation.stats.get('avg_hours_per_employee_per_day', 0):.2f}"
+                    f"  Avg hours/employee/day: {validation.stats.get(
+                        'avg_hours_per_employee_per_day', 0):.2f}"
                 )
                 print(
-                    f"  Shift distribution: {validation.stats.get('shift_counts', {})}"
+                    f"  Shift distribution: {
+                        validation.stats.get('shift_counts', {})}"
                 )
 
             results.append((instance_name, validation.is_valid, validation))
@@ -429,7 +444,8 @@ def main():
 
     args = parser.parse_args()
 
-    validate_results_log(args.results_file, args.inputs_dir, verbose=not args.quiet)
+    validate_results_log(args.results_file, args.inputs_dir,
+                         verbose=not args.quiet)
 
 
 if __name__ == "__main__":

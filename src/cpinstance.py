@@ -8,6 +8,40 @@ from typing import Optional, List, Tuple
 
 from ortools.constraint_solver import pywrapcp
 
+# ========== CONSTRAINT FLAGS (for incremental testing) ==========
+# Core constraints (required by spec)
+ENABLE_TABLE_CONSTRAINTS = True  # (shift, hours) validity links
+ENABLE_TRAINING = True  # AllDifferent for first 4 days
+ENABLE_DEMAND = True  # Distribute for minDemandDayShift
+ENABLE_MIN_DAILY_OPERATION = True  # Sum of hours >= minDailyOperation
+ENABLE_WEEKLY_HOURS = True  # BetweenCt for min/max weekly
+ENABLE_NIGHT_CONSECUTIVE = True  # Sliding window for maxConsecutiveNightShift
+ENABLE_NIGHT_TOTAL = True  # Total night shift limit
+
+# Redundant constraints (implied, for stronger propagation)
+ENABLE_SYMMETRY_BREAKING = True  # Lexicographic employee ordering
+ENABLE_REDUNDANT_MAX_OFF = True  # Upper bound on off-shifts per day
+ENABLE_TOTAL_HORIZON = True  # Global min/max hours over entire period
+ENABLE_IMPLIED_WORKING_DAYS = True  # Min/max working days per employee
+
+# Search strategy flags
+IS_DEFAULT = True  # Use DefaultPhase (vs custom Phase)
+IS_TIGHT = False  # Tight mode: deterministic, fail-first
+IS_RESTART = True  # Use LubyRestart for exploration
+
+# Ethical/Employee-friendly flags
+# When ETHICAL_OFF_FIRST=True, OFF_SHIFT=0 so ASSIGN_MIN_VALUE tries off-shifts
+# first, giving employees more rest days. When False, OFF_SHIFT=4 so working
+# shifts (1,2,3) are preferred, maximizing productivity.
+
+# NOTE: in this same spirit maybe reorganizing the shift preferring day shifts first would
+# give better propoagation
+ETHICAL_OFF_FIRST = False  # Prefer giving employees days off
+# When ENABLE_POST_PROCESS=True, start times are evenly distributed within each
+# shift to spread out coverage. When False, everyone starts at shift start time.
+ENABLE_POST_PROCESS = True  # Even spread of start times within shifts
+# =================================================================
+
 
 class CPInstance:
     # BUSINESS parameters
@@ -36,9 +70,9 @@ class CPInstance:
         self.filename = filename
 
         # Define our shift constants
-        # NOTE: This is making them work a lot
-        # this might also be another count of --ethical flag
-        self.OFF_SHIFT = 4
+        # OFF_SHIFT=0: off-shifts tried first with ASSIGN_MIN_VALUE (employee-friendly)
+        # OFF_SHIFT=4: working shifts (1,2,3) tried first (productivity-focused)
+        self.OFF_SHIFT = 0 if ETHICAL_OFF_FIRST else 4
         self.WORKING_SHIFTS = [1, 2, 3]  # Night, Day, Evening
 
         self.load_from_file(filename)
@@ -78,14 +112,15 @@ class CPInstance:
         self.minDemandDayShift = []
         if raw:
             for i in range(0, self.numDays * self.numShifts, self.numShifts):
-                self.minDemandDayShift.append(raw[i : i + self.numShifts])
+                self.minDemandDayShift.append(raw[i: i + self.numShifts])
 
         self.minDailyOperation = params.get("Business_minDailyOperation")
         self.minConsecutiveWork = params.get("Employee_minConsecutiveWork")
         self.maxDailyWork = params.get("Employee_maxDailyWork")
         self.minWeeklyWork = params.get("Employee_minWeeklyWork")
         self.maxWeeklyWork = params.get("Employee_maxWeeklyWork")
-        self.maxConsecutiveNightShift = params.get("Employee_maxConsecutiveNigthShift")
+        self.maxConsecutiveNightShift = params.get(
+            "Employee_maxConsecutiveNigthShift")
         self.maxTotalNightShift = params.get("Employee_maxTotalNigthShift")
 
     def _precompute_tuples(self):
@@ -140,158 +175,167 @@ class CPInstance:
 
         # TABLE CONSTRAINTS (AllowedAssignments)
         # Links shift and hours via valid (shift, hours) pairs
-        for e in range(E):
-            for d in range(D):
-                self.solver.Add(
-                    self.solver.AllowedAssignments(
-                        [shift[e][d], hours[e][d]], valid_tuples
-                    )
-                )
-
-        # # SYMMETRY BREAKING
-        # for e in range(E - 1):
-        #     self.solver.Add(shift[e][0] <= shift[e + 1][0])
-
-        # Force Employee e's entire 21+ day schedule to be lexicographically
-        # less than or equal to Employee e+1's schedule.
-        for e in range(E - 1):
-            employee_e_shifts = []
-            employee_next_shifts = []
-
-            # Gather the full horizon of shift variables for both employees
-            for d in range(D):
-                employee_e_shifts.append(shift[e][d])
-                employee_next_shifts.append(shift[e + 1][d])
-
-            # Apply the legacy CP solver's lexicographical constraint
-            self.solver.Add(
-                self.solver.LexicalLessOrEqual(employee_e_shifts, employee_next_shifts)
-            )
-
-        # TRAINING
-        # TODO: would this be faster instead of alldifferent?
-        # training_days = min(D, 4)
-        # if training_days == 4:
-        #     for e in range(E):
-        #         s = shift[e]
-        #         self.solver.Add(s[0] != s[1])
-        #         self.solver.Add(s[0] != s[2])
-        #         self.solver.Add(s[0] != s[3])
-        #         self.solver.Add(s[1] != s[2])
-        #         self.solver.Add(s[1] != s[3])
-        #         self.solver.Add(s[2] != s[3])
-
-        # Distribute
-        # Overload 1: All variables are pairwise different. This corresponds to the stronger version of the propagation algorithm.
-        #
-        # |
-        #
-        # Overload 2: All variables are pairwise different. If 'stronger_propagation' is true, stronger, and potentially slower propagation will occur. This API will be deprecated in the future.
-        for e in range(E):
-            training_days = min(D, 4)
-            if training_days > 1:
-                self.solver.Add(
-                    self.solver.AllDifferent(
-                        [shift[e][d] for d in range(training_days)]
-                    )
-                )
-
-        # DEMAND - Using Distribute (global cardinality constraint)
-        for d in range(D):
-            day_shifts = [shift[e][d] for e in range(E)]
-            # Values: Night=1, Day=2, Evening=3, Off=4
-            values = [1, 2, 3, self.OFF_SHIFT]
-            card_min = [
-                self.minDemandDayShift[d][1],  # Night demand
-                self.minDemandDayShift[d][2],  # Day demand
-                self.minDemandDayShift[d][3],  # Evening demand
-                0,  # Off (no minimum)
-            ]
-            card_max = [E, E, E, E]  # No upper limit on any shift
-            self.solver.Add(
-                self.solver.Distribute(day_shifts, values, card_min, card_max)
-            )
-
-        # MIN DAILY OPERATION
-        for d in range(D):
-            self.solver.Add(
-                self.solver.Sum([hours[e][d] for e in range(E)])
-                >= self.minDailyOperation
-            )
-
-        # WEEKLY HOURS - Using BetweenCt for cleaner constraint
-        for e in range(E):
-            for w in range(W):
-                week_start = w * 7
-                if week_start + 7 <= D:
-                    week_hours = [
-                        hours[e][d] for d in range(week_start, week_start + 7)
-                    ]
-                    week_sum = self.solver.Sum(week_hours)
+        if ENABLE_TABLE_CONSTRAINTS:
+            for e in range(E):
+                for d in range(D):
                     self.solver.Add(
-                        self.solver.BetweenCt(
-                            week_sum, self.minWeeklyWork, self.maxWeeklyWork
+                        self.solver.AllowedAssignments(
+                            [shift[e][d], hours[e][d]], valid_tuples
                         )
                     )
 
-        # NIGHT SHIFTS
-        for e in range(E):
-            # TODO: There must be something different we can do that here
-            window_size = self.maxConsecutiveNightShift + 1
-            if window_size <= D:
-                for d in range(D - window_size + 1):
-                    window = [is_night[e][d + i] for i in range(window_size)]
+        # SYMMETRY BREAKING
+        # Force Employee e's entire 21+ day schedule to be lexicographically
+        # less than or equal to Employee e+1's schedule.
+        if ENABLE_SYMMETRY_BREAKING:
+            for e in range(E - 1):
+                employee_e_shifts = []
+                employee_next_shifts = []
+
+                # Gather the full horizon of shift variables for both employees
+                for d in range(D):
+                    employee_e_shifts.append(shift[e][d])
+                    employee_next_shifts.append(shift[e + 1][d])
+
+                # Apply the legacy CP solver's lexicographical constraint
+                self.solver.Add(
+                    self.solver.LexicalLessOrEqual(
+                        employee_e_shifts, employee_next_shifts
+                    )
+                )
+
+        # TRAINING
+        # AllDifferent for first 4 days - each employee experiences all shifts
+        if ENABLE_TRAINING:
+            for e in range(E):
+                training_days = min(D, 4)
+                if training_days > 1:
                     self.solver.Add(
-                        self.solver.Sum(window) <= self.maxConsecutiveNightShift
+                        self.solver.AllDifferent(
+                            [shift[e][d] for d in range(training_days)]
+                        )
                     )
 
-            self.solver.Add(self.solver.Sum(is_night[e]) <= self.maxTotalNightShift)
-
-        # REDUNDANT CONSTRAINTS
-        for d in range(D):
-            min_workers_demand = sum(
-                self.minDemandDayShift[d][s] for s in self.WORKING_SHIFTS
-            )
-            min_workers_hours = math.ceil(self.minDailyOperation / self.maxDailyWork)
-            min_workers = max(min_workers_demand, min_workers_hours)
-            max_off = E - min_workers
-            if max_off >= 0 and max_off < E:
+        # DEMAND - Using Distribute (global cardinality constraint)
+        if ENABLE_DEMAND:
+            for d in range(D):
+                day_shifts = [shift[e][d] for e in range(E)]
+                # Values: Night=1, Day=2, Evening=3, Off=4
+                values = [1, 2, 3, self.OFF_SHIFT]
+                card_min = [
+                    self.minDemandDayShift[d][1],  # Night demand
+                    self.minDemandDayShift[d][2],  # Day demand
+                    self.minDemandDayShift[d][3],  # Evening demand
+                    0,  # Off (no minimum)
+                ]
+                card_max = [E, E, E, E]  # No upper limit on any shift
                 self.solver.Add(
-                    self.solver.Sum([shift[e][d] == self.OFF_SHIFT for e in range(E)])
-                    <= max_off
+                    self.solver.Distribute(
+                        day_shifts, values, card_min, card_max)
                 )
+
+        # MIN DAILY OPERATION
+        if ENABLE_MIN_DAILY_OPERATION:
+            for d in range(D):
+                self.solver.Add(
+                    self.solver.Sum([hours[e][d] for e in range(E)])
+                    >= self.minDailyOperation
+                )
+
+        # WEEKLY HOURS - Using BetweenCt for cleaner constraint
+        if ENABLE_WEEKLY_HOURS:
+            for e in range(E):
+                for w in range(W):
+                    week_start = w * 7
+                    if week_start + 7 <= D:
+                        week_hours = [
+                            hours[e][d] for d in range(week_start, week_start + 7)
+                        ]
+                        week_sum = self.solver.Sum(week_hours)
+                        self.solver.Add(
+                            self.solver.BetweenCt(
+                                week_sum, self.minWeeklyWork, self.maxWeeklyWork
+                            )
+                        )
+
+        # NIGHT SHIFTS - CONSECUTIVE
+        if ENABLE_NIGHT_CONSECUTIVE:
+            for e in range(E):
+                window_size = self.maxConsecutiveNightShift + 1
+                if window_size <= D:
+                    for d in range(D - window_size + 1):
+                        window = [is_night[e][d + i]
+                                  for i in range(window_size)]
+                        self.solver.Add(
+                            self.solver.Sum(
+                                window) <= self.maxConsecutiveNightShift
+                        )
+
+        # NIGHT SHIFTS - TOTAL
+        if ENABLE_NIGHT_TOTAL:
+            for e in range(E):
+                self.solver.Add(self.solver.Sum(
+                    is_night[e]) <= self.maxTotalNightShift)
+
+        # REDUNDANT CONSTRAINTS - Max off-shifts per day
+        if ENABLE_REDUNDANT_MAX_OFF:
+            for d in range(D):
+                min_workers_demand = sum(
+                    self.minDemandDayShift[d][s] for s in self.WORKING_SHIFTS
+                )
+                min_workers_hours = math.ceil(
+                    self.minDailyOperation / self.maxDailyWork
+                )
+                min_workers = max(min_workers_demand, min_workers_hours)
+                max_off = E - min_workers
+                if max_off >= 0 and max_off < E:
+                    self.solver.Add(
+                        self.solver.Sum(
+                            [shift[e][d] == self.OFF_SHIFT for e in range(E)]
+                        )
+                        <= max_off
+                    )
 
         # TOTAL HORIZON
         # NOTE: This seems to somewhat help 21 day cases
-        for e in range(E):
-            employee_all_hours = [hours[e][d] for d in range(D)]
+        if ENABLE_TOTAL_HORIZON:
+            for e in range(E):
+                employee_all_hours = [hours[e][d] for d in range(D)]
 
-            # Constraints the total work over the whole period
+                # Constraints the total work over the whole period
+                self.solver.Add(
+                    self.solver.Sum(
+                        employee_all_hours) >= self.minWeeklyWork * W
+                )
+                self.solver.Add(
+                    self.solver.Sum(
+                        employee_all_hours) <= self.maxWeeklyWork * W
+                )
+
+            # Total hours across ALL employees for ALL days must meet the total min operation
+            all_hours_in_system = [hours[e][d]
+                                   for e in range(E) for d in range(D)]
+            total_required_hours = self.minDailyOperation * D
+
             self.solver.Add(
-                self.solver.Sum(employee_all_hours) >= self.minWeeklyWork * W
+                self.solver.Sum(all_hours_in_system) >= total_required_hours
             )
-            self.solver.Add(
-                self.solver.Sum(employee_all_hours) <= self.maxWeeklyWork * W
-            )
-
-        # Total hours across ALL employees for ALL days must meet the total min operation
-        all_hours_in_system = [hours[e][d] for e in range(E) for d in range(D)]
-        total_required_hours = self.minDailyOperation * D
-
-        self.solver.Add(self.solver.Sum(all_hours_in_system) >= total_required_hours)
 
         # IMPLIED CONSTRAINTS: Min/Max working days per employee
         # Each employee must work a minimum number of days to meet weekly hours
-        min_working_days = math.ceil((self.minWeeklyWork * W) / self.maxDailyWork)
-        max_working_days = min(D, (self.maxWeeklyWork * W) // self.minConsecutiveWork)
+        if ENABLE_IMPLIED_WORKING_DAYS:
+            min_working_days = math.ceil(
+                (self.minWeeklyWork * W) / self.maxDailyWork)
+            max_working_days = min(
+                D, (self.maxWeeklyWork * W) // self.minConsecutiveWork
+            )
 
-        for e in range(E):
-            is_working = [shift[e][d] != self.OFF_SHIFT for d in range(D)]
-            self.solver.Add(self.solver.Sum(is_working) >= min_working_days)
-            self.solver.Add(self.solver.Sum(is_working) <= max_working_days)
-
-        # NOTE: For now easy switch
-        is_tight = False
+            for e in range(E):
+                is_working = [shift[e][d] != self.OFF_SHIFT for d in range(D)]
+                self.solver.Add(self.solver.Sum(
+                    is_working) >= min_working_days)
+                self.solver.Add(self.solver.Sum(
+                    is_working) <= max_working_days)
 
         # SEARCH STRATEGY
         all_shift_vars = []
@@ -309,10 +353,7 @@ class CPInstance:
 
         all_vars = all_shift_vars + all_hours_vars
 
-        # just for trying
-        is_default = True
-
-        if is_default:
+        if IS_DEFAULT:
             db = self.solver.DefaultPhase(
                 all_vars,
                 # self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
@@ -321,7 +362,7 @@ class CPInstance:
         else:
             # TODO: Would impact based search heuristics help here??
             # PHASE 1: Decide Shifts dynamically based on tightness
-            if is_tight:
+            if IS_TIGHT:
                 # Deterministic: Fail-first, assign smallest values (good for constrained spaces)
                 db_shifts = self.solver.Phase(
                     all_shift_vars,
@@ -347,12 +388,13 @@ class CPInstance:
 
         # MONITORS & LIMITS
         monitors = []
-        if not is_tight:
-            # Only use LubyRestarts if we are randomly exploring (loose instances)
+        if IS_RESTART:
+            # Use LubyRestarts for exploration (good for loose instances)
             monitors.append(self.solver.LubyRestart(100))
 
         if time_limit_seconds:
-            monitors.append(self.solver.TimeLimit(int(time_limit_seconds * 1000)))
+            monitors.append(self.solver.TimeLimit(
+                int(time_limit_seconds * 1000)))
 
         # TODO: would this even work def BranchesLimit(self, branches):
         # Creates a search limit that constrains the number of branches explored in the search tree.
@@ -361,42 +403,53 @@ class CPInstance:
         self.solver.NewSearch(db, monitors)
 
         if self.solver.NextSolution():
-            # POST-COMPUTATION: Distribute start times across shifts
-            SHIFT_BOUNDS = {1: (0, 8), 2: (8, 16), 3: (16, 24)}
+            # Shift start times for computing begin/end
+            SHIFT_START = {1: 0, 2: 8, 3: 16}  # Night, Day, Evening
 
-            # Step 1: Extract raw solution
+            # Step 1: Extract raw solution (shift, hours) for each (employee, day)
             raw_solution = {}
             for e in range(E):
                 for d in range(D):
-                    raw_solution[(e, d)] = (shift[e][d].Value(), hours[e][d].Value())
+                    raw_solution[(e, d)] = (
+                        shift[e][d].Value(), hours[e][d].Value())
 
-            # Step 2: Group by (day, shift)
-            groups = defaultdict(list)
-            for (e, d), (shift_val, hours_val) in raw_solution.items():
-                if shift_val != self.OFF_SHIFT:
-                    groups[(d, shift_val)].append((e, hours_val))
-
-            # Step 3: Compute distributed start times
+            # Step 2: Compute begin times
             begin_times = {}
-            for (d, shift_val), employees in groups.items():
-                shift_start, shift_end = SHIFT_BOUNDS[shift_val]
-                n = len(employees)
 
-                # Sort by hours worked (shorter shifts get later indices)
-                employees_sorted = sorted(employees, key=lambda x: x[1])
+            if ENABLE_POST_PROCESS:
+                # POST-PROCESSING: Distribute start times evenly within each shift
+                # Groups employees by (day, shift) and spreads their start times
+                SHIFT_BOUNDS = {1: (0, 8), 2: (8, 16), 3: (16, 24)}
 
-                for i, (e, hours_val) in enumerate(employees_sorted):
-                    max_start = shift_end - hours_val
-                    range_size = max_start - shift_start
+                groups = defaultdict(list)
+                for (e, d), (shift_val, hours_val) in raw_solution.items():
+                    if shift_val != self.OFF_SHIFT:
+                        groups[(d, shift_val)].append((e, hours_val))
 
-                    if n > 1 and range_size > 0:
-                        offset = (i * range_size) // (n - 1)
-                    else:
-                        offset = 0
+                for (d, shift_val), employees in groups.items():
+                    shift_start, shift_end = SHIFT_BOUNDS[shift_val]
+                    n = len(employees)
 
-                    begin_times[(e, d)] = shift_start + offset
+                    # Sort by hours worked (shorter shifts get later indices)
+                    employees_sorted = sorted(employees, key=lambda x: x[1])
 
-            # Step 4: Build final schedule
+                    for i, (e, hours_val) in enumerate(employees_sorted):
+                        max_start = shift_end - hours_val
+                        range_size = max_start - shift_start
+
+                        if n > 1 and range_size > 0:
+                            offset = (i * range_size) // (n - 1)
+                        else:
+                            offset = 0
+
+                        begin_times[(e, d)] = shift_start + offset
+            else:
+                # NO POST-PROCESSING: Everyone starts at shift start time
+                for (e, d), (shift_val, hours_val) in raw_solution.items():
+                    if shift_val != self.OFF_SHIFT:
+                        begin_times[(e, d)] = SHIFT_START[shift_val]
+
+            # Step 3: Build final schedule
             schedule = []
             for e in range(E):
                 emp_schedule = []
