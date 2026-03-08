@@ -2,6 +2,12 @@
 
 A constraint programming solution for employee scheduling using Google OR-Tools CP Solver.
 
+# TODO
+- add about how tried pure constraint firt
+- space for validation so validtor and its test
+- add about how initially it was very slow for large instances 14 days beyond
+- redundancy constraints and restarts were learnt from this
+
 ## Model Optimizations
 
 ### Hours-Only Variable Simplification
