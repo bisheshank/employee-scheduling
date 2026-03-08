@@ -1,34 +1,62 @@
 # Employee Scheduling - CP Solver
 
-A constraint programming solution for employee scheduling using Google OR-Tools CP Solver.
+A constraint programming solution for employee scheduling using Google OR-Tools CP Solver (not CP-SAT). This project generates weekly schedules for manufacturing employees while respecting labor rules, training requirements, and production demands.
 
-# TODO
-- add about how tried pure constraint firt
-- space for validation so validtor and its test
-- add about how initially it was very slow for large instances 14 days beyond
-- redundancy constraints and restarts were learnt from this
+## Problem Overview
 
-## Model Optimizations
+The scheduling problem involves assigning employees to shifts (Night: 0-8, Day: 8-16, Evening: 16-24, or Off) over a multi-week horizon. Each schedule must satisfy:
 
-### Hours-Only Variable Simplification
+- **Training**: First 4 days require each employee to experience all 4 shift types (including off)
+- **Demand**: Minimum employees per shift per day (`minDemandDayShift[day][shift]`)
+- **Daily Operation**: Total hours worked across all employees meets daily minimum
+- **Work Limits**: 4-8 hours per shift, 20-40 hours per week
+- **Night Shift Limits**: No consecutive night shifts, capped total night shifts per employee
 
-The original model used 4 decision variables per employee-day:
+## Development Journey
+
+### Initial Approach: 4-Variable Model
+
+The first implementation used 4 decision variables per employee-day:
 - `shift[e][d]` - which shift (off, night, day, evening)
-- `begin[e][d]` - start hour
-- `end[e][d]` - end hour
-- `hours[e][d]` - hours worked
+- `begin[e][d]` - start hour (0-24)
+- `end[e][d]` - end hour (0-24)
+- `hours[e][d]` - hours worked (0-8)
 
-We simplified this to just 2 variables:
-- `shift[e][d]` - which shift
-- `hours[e][d]` - hours worked
+We pre-computed valid `(shift, begin, end, hours)` tuples (~50+ combinations) and used `AllowedAssignments` table constraints. This worked for smaller instances but struggled with larger ones (21+ days, 30+ employees) - the search space was too large.
 
-The key insight is that no constraint in the problem actually depends on specific begin/end times. All constraints only care about:
-- Which shift an employee is assigned to (for demand, training, night shift limits)
+### Building the Validator
+
+To verify our solutions were actually correct, we built a standalone validator (`src/validator.py`). This checks all 9 constraint types from the handout. We weren't even sure if the validator itself was correct initially, so we had some unit tests for it (`src/test_validator.py`).
+
+Having an independent validator proved invaluable - it caught several edge cases in our model and gave us confidence when experimenting with optimizations.
+
+### Optimization Discoveries
+
+Through experimentation, we discovered several techniques that significantly improved performance:
+
+1. **Constraint Ordering**: The order constraints are added affects propagation. Adding demand constraints early helps prune infeasible branches faster.
+
+2. **Redundant Constraints**: Adding implied constraints (like upper bounds on off-shifts per day derived from demand) strengthens propagation even though they're logically redundant.
+
+3. **Restarts**: `LubyRestart(100)` helps escape bad branches in loose instances where the solver might explore unproductive regions of the search tree.
+
+### Key Insight: Hours-Only Variables
+
+After class discussion about exploiting problem structure, we realized that **no constraint actually depends on specific begin/end times** - they only care about:
+- Which shift an employee is assigned to (for demand, training, night limits)
 - How many hours they work (for weekly totals, daily operation)
 
-The begin/end times are computed in post-processing based on shift and hours.
+This led to our simplified 2-variable model that reduced search space by 50%.
 
-This reduces the search space by 50% (from 4 variables to 2 per employee-day) and shrinks the table constraint tuples from ~50+ combinations to just 16.
+## Model Details
+
+### Decision Variables
+
+The final model uses just 2 variables per employee-day (see `cpinstance.py:162-169`):
+- `shift[e][d]` - which shift (domain: Off, Night=1, Day=2, Evening=3)
+- `hours[e][d]` - hours worked (domain: 0, 4, 5, 6, 7, 8)
+
+This reduces search space by 50% compared to the original 4-variable model. Begin/end times are computed post-solution based on shift and hours.
 
 ### Table Constraint Simplification
 
