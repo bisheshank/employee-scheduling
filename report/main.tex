@@ -1,0 +1,143 @@
+\documentclass[11pt]{article}
+
+\usepackage[round]{natbib}
+\usepackage{fullpage}
+\usepackage[top=2cm, bottom=4.5cm, left=2.5cm, right=2.5cm]{geometry}
+\usepackage{amsmath,amsthm,amsfonts,amssymb,amscd}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{lastpage}
+\usepackage{enumerate}
+\usepackage{fancyhdr}
+\usepackage{mathrsfs}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{hyperref}
+
+\hypersetup{%
+  colorlinks=true,
+  linkcolor=blue,
+  linkbordercolor={0 0 1}
+}
+
+\renewcommand\lstlistingname{Code}
+\renewcommand\lstlistlistingname{Code}
+\def\lstlistingautorefname{Code}
+ 
+\lstdefinestyle{Python}{
+    language        = Python,
+    frame           = lines, 
+    numbers=left,
+    basicstyle      = \footnotesize,
+    keywordstyle    = \color{blue},
+    stringstyle     = \color{red},
+    commentstyle    = \color{green}\ttfamily
+}
+
+\setlength{\parindent}{0.0in}
+\setlength{\parskip}{0.05in}
+
+%%%%%%%%%%%%% INPUT HERE
+\newcommand\COURSE{CSCI2951-O}
+\newcommand\PROJECTNUMBER{II}
+\newcommand\FULLNAMEONE{MINDY KIM}
+\newcommand\FULLNAMETWO{BISHESHANK C ARYAL}
+\newcommand\CSLOGINS{mkim bcaryal}       
+\newcommand\SCREENNAME{ari ar} 
+
+\pagestyle{fancyplain}
+\headheight 35pt
+\lhead{\FULLNAMEONE\\\FULLNAMETWO}
+\chead{\textbf{\Large Project -- \PROJECTNUMBER}}
+\rhead{\CSLOGINS \\ \SCREENNAME}
+\lfoot{}
+\cfoot{}
+\rfoot{\small\thepage}
+\headsep 1.5em
+
+%%%%%%%%%%%%% INPUT HERE
+\begin{document}
+
+\section*{Constraint Model}
+
+\subsection*{Decision Variables}
+
+Our final model uses just two variables per employee-day:
+\begin{itemize}
+	\item \texttt{shift[e][d]} $\in \{0, 1, 2, 3\}$ (Off, Night, Day, Evening)
+	\item \texttt{hours[e][d]} $\in \{0, 4, 5, 6, 7, 8\}$ (hours worked)
+\end{itemize}
+
+This was not our first approach. Initially, we modeled four variables: \texttt{shift}, \texttt{begin}, \texttt{end}, and \texttt{hours}, with roughly 50+ valid tuples linking them via \texttt{AllowedAssignments}. It worked for smaller instances but struggled on larger ones (21+ days, 30+ employees).
+
+The key realization came from realizing that no constraint in the problem actually depends on specific start/end times. They only care about which shift someone is assigned to (for demand, training, night limits) and how many hours they work (for weekly totals, daily operation). Begin and end times are just cosmetic details. Dropping them from the search space cut our variable count in half and reduced tuples from 50+ to exactly 16. This idea came from the class last week and sped up our implementation by manyfold.
+
+\subsection*{Constraints}
+
+The core constraints directly encode the problem specification:
+\begin{itemize}
+	\item \textbf{Table Constraints}: \texttt{AllowedAssignments} links each \texttt{(shift, hours)} pair to the 16 valid combinations (off with 0 hours, or working shifts with 4--8 hours).
+	\item \textbf{Training}: \texttt{AllDifferent} on the first 4 days ensures each employee experiences all shift types.
+	\item \textbf{Demand}: \texttt{Distribute} (global cardinality) enforces minimum employees per shift per day. This provides stronger propagation than individual counting constraints.
+	\item \textbf{Daily Operation}: Sum of all hours per day $\geq$ \texttt{minDailyOperation}.
+	\item \textbf{Weekly Hours}: \texttt{BetweenCt} constrains each employee's weekly hours to [20, 40].
+	\item \textbf{Night Limits}: Sliding window constraints for consecutive nights; sum constraint for total night shifts. We thought about doing the optimization since the inputs only care about 2 night shifts but keeping scalability in mind we kept this as is.
+\end{itemize}
+
+We also added several redundant constraints that strengthen propagation:
+\begin{itemize}
+	\item \textbf{Max Off-Shifts}: Upper bound on off-shifts per day, derived from demand requirements.
+	\item \textbf{Total Horizon}: Min/max hours over the entire scheduling period per employee.
+	\item \textbf{Implied Working Days}: Each employee must work at least $\lceil(\texttt{minWeekly} \times W) / \texttt{maxDaily}\rceil$ days.
+	\item \textbf{Symmetry Breaking}: Lexicographic ordering of employee schedules.
+\end{itemize}
+
+\section*{Search Guidance}
+
+We actually implemented custom search heuristics early on, before Part 2 was assigned, because the default phase was too slow on larger instances. What surprised us was how dramatically different the same constraints could perform under different search strategies.
+
+Our search strategy uses a two-phase approach:
+\begin{enumerate}
+	\item \textbf{Shift Assignment}: Variables ordered by day-first (all employees for day 0, then day 1, etc.) to help demand constraints propagate early. Variable selection uses \texttt{CHOOSE\_MIN\_SIZE\_LOWEST\_MIN} (fail-first). Value selection tries working shifts before off-shifts, since working shifts are more constrained and trigger more propagation.
+	\item \textbf{Hours Assignment}: After shifts are fixed, hours are assigned with \texttt{ASSIGN\_MIN\_VALUE}.
+\end{enumerate}
+
+We also use \texttt{LubyRestart(100)} for search diversification---particularly helpful on loosely constrained instances where the solver might otherwise explore unproductive regions of the search tree.
+
+An interesting observation: preferring off-shifts first (more ``employee-friendly'') actually makes search \textit{slower}. Off-shifts don't constrain much, so trying them first means less early pruning. There's a genuine trade-off between search efficiency and schedule quality from an employee welfare perspective.
+
+\section*{Schedule Quality Analysis}
+
+From the perspective of a store manager evaluating these schedules:
+
+\textbf{What Works Well:}
+\begin{itemize}
+	\item Schedules satisfy all hard constraints---labor rules, training requirements, demand coverage.
+	\item Solve times are fast (under 1 second for most instances).
+	\item The training period structure (first 4 days) ensures all employees get exposure to each shift type.
+\end{itemize}
+
+\textbf{What's Missing:}
+\begin{itemize}
+	\item No preference for consistency---employees might get wildly different schedules week-to-week.
+	\item No fairness consideration---some employees might get more desirable shifts than others.
+	\item Night shifts are distributed to minimize constraint violations, not to minimize employee burden.
+\end{itemize}
+
+\textbf{Post-Processing for Realism:} Rather than overloading the solver with soft objectives, we distribute start times \textit{after} the solver finds a feasible solution. Employees sharing the same shift on the same day get staggered start times across the valid range. This produces more realistic schedules where everyone isn't clocking in simultaneously.
+
+\textbf{Suggestions for Improvement:}
+\begin{itemize}
+	\item Add shift preference constraints if employee preferences are known.
+	\item Implement fairness metrics (for example balance night shift burden across employees).
+	\item Consider multi-objective optimization for balancing productivity vs.\ employee satisfaction.
+\end{itemize}
+
+The key takeaway: the solver handles feasibility well, but ``good'' schedules require domain knowledge that's better applied in post-processing than in additional constraints. Using the solver only for what it's good at, which is constraint satisfaction, and handling distribution concerns separately keeps the model tractable.
+
+\section*{Time Spent}
+
+Approximately 20--30 hours total. The majority was spent on the initial 4-variable model and debugging, followed by the realization that a simpler model worked better. Building the validator proved invaluable for catching edge cases and gave us confidence when experimenting with optimizations.
+
+\end{document}
