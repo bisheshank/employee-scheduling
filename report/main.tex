@@ -93,6 +93,14 @@ We also added several redundant constraints that strengthen propagation:
 	\item \textbf{Symmetry Breaking}: Lexicographic ordering of employee schedules.
 \end{itemize}
 
+\section*{Validation Infrastructure}
+
+Before trusting any optimization, we needed to know our solutions were actually correct. We built a standalone validator (\texttt{validator.py}) that independently checks all 9 constraint types from the handout: valid shift/time assignments, min consecutive work, max daily work, weekly hour bounds, demand per shift, daily operation totals, training requirements, and both night shift constraints.
+
+The validator wasn't just a debugging tool: we initially weren't sure if the validator itself was correct. So we wrote unit tests for the validator (\texttt{test\_validator.py}) with deliberately invalid schedules designed to trigger each constraint violation. This gave us a ground truth we could rely on when the solver's output looked suspicious.
+
+Having this infrastructure proved valuable. When experimenting with redundant constraints or different search strategies, we could immediately verify that ``faster'' solutions weren't just ``wrong'' solutions. It also caught several subtle edge cases in our model---for instance, the training constraint needed to enforce that shifts are \textit{all different} in the first 4 days, not just that each shift type appears at least once.
+
 \section*{Search Guidance}
 
 We actually implemented custom search heuristics early on, before Part 2 was assigned, because the default phase was too slow on larger instances. What surprised us was how dramatically different the same constraints could perform under different search strategies.
@@ -138,6 +146,6 @@ The key takeaway: the solver handles feasibility well, but ``good'' schedules re
 
 \section*{Time Spent}
 
-Approximately 20--30 hours total. The majority was spent on the initial 4-variable model and debugging, followed by the realization that a simpler model worked better. Building the validator proved invaluable for catching edge cases and gave us confidence when experimenting with optimizations.
+Approximately 20--30 hours total. The majority was spent on the initial 4-variable model and debugging, followed by the realization that a simpler model worked better. A good chunk of time went into building and testing the validator. But that investment paid off quickly when we started experimenting with optimizations and needed confidence that our ``improved'' solutions were still correct.
 
 \end{document}

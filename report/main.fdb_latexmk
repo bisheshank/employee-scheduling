@@ -1,5 +1,5 @@
 # Fdb version 4
-["pdflatex"] 1773244643.42291 "main.tex" "main.pdf" "main" 1773244644.45728 0
+["pdflatex"] 1773245058.28172 "main.tex" "main.pdf" "main" 1773245059.19546 0
   "/opt/homebrew/Cellar/texlive/20250308_1/share/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1741388039 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "/opt/homebrew/Cellar/texlive/20250308_1/share/texmf-dist/fonts/map/fontname/texfonts.map" 1741388039 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/opt/homebrew/Cellar/texlive/20250308_1/share/texmf-dist/fonts/map/pdftex/updmap/pdftex.map" 1741388039 5466553 2748998d7db8078826afa1f272036265 ""
@@ -113,9 +113,9 @@
   "/opt/homebrew/Cellar/texlive/20250308_1/share/texmf-dist/tex/latex/xcolor/xcolor.sty" 1741388039 55384 b454dec21c2d9f45ec0b793f0995b992 ""
   "/opt/homebrew/Cellar/texlive/20250308_1/share/texmf-dist/web2c/texmf.cnf" 1741388039 42151 79f67285bdd95beca4d137b380b4b9e5 ""
   "/opt/homebrew/Cellar/texlive/20250308_1/share/texmf-var/web2c/pdftex/pdflatex.fmt" 1741388039 3346141 1288109d02d1c772df65535881471649 ""
-  "main.aux" 1773244644.37395 267 26de29d7b8ef240c9bda48d328bde57c "pdflatex"
-  "main.out" 1773244644.13281 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
-  "main.tex" 1773244642.51386 7665 263c5441345712f0ae973287b6b0e723 ""
+  "main.aux" 1773245059.1152 267 26de29d7b8ef240c9bda48d328bde57c "pdflatex"
+  "main.out" 1773245058.92395 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
+  "main.tex" 1773245043.38446 8990 5f7cc147baac4634baa2f0afbee0d5fc ""
   (generated)
   "main.aux"
   "main.log"
