@@ -25,9 +25,10 @@ ENABLE_TOTAL_HORIZON = True  # Global min/max hours over entire period
 ENABLE_IMPLIED_WORKING_DAYS = True  # Min/max working days per employee
 
 # Search strategy flags
-IS_DEFAULT = True  # Use DefaultPhase (vs custom Phase)
+IS_DEFAULT = False  # Use DefaultPhase (vs custom Phase)
 IS_TIGHT = False  # Tight mode: deterministic, fail-first
-IS_RESTART = True  # Use LubyRestart for exploration
+IS_RESTART = False  # Use LubyRestart for exploration
+IS_DAY_PHASE = True
 
 # Ethical/Employee-friendly flags
 # When ETHICAL_OFF_FIRST=True, OFF_SHIFT=0 so ASSIGN_MIN_VALUE tries off-shifts
@@ -173,6 +174,11 @@ class CPInstance:
             for e in range(E)
         ]
 
+        avg_forced = sum(
+            sum(self.minDemandDayShift[d][s] for s in self.WORKING_SHIFTS)
+            for d in range(D)
+        ) / (D * E)
+
         # TABLE CONSTRAINTS (AllowedAssignments)
         # Links shift and hours via valid (shift, hours) pairs
         if ENABLE_TABLE_CONSTRAINTS:
@@ -188,19 +194,12 @@ class CPInstance:
         # Force Employee e's entire 21+ day schedule to be lexicographically
         # less than or equal to Employee e+1's schedule.
         if ENABLE_SYMMETRY_BREAKING:
+            sym_days = min(D, 14)
             for e in range(E - 1):
-                employee_e_shifts = []
-                employee_next_shifts = []
-
-                # Gather the full horizon of shift variables for both employees
-                for d in range(D):
-                    employee_e_shifts.append(shift[e][d])
-                    employee_next_shifts.append(shift[e + 1][d])
-
-                # Apply the legacy CP solver's lexicographical constraint
                 self.solver.Add(
                     self.solver.LexicalLessOrEqual(
-                        employee_e_shifts, employee_next_shifts
+                        [shift[e][d] for d in range(sym_days)],
+                        [shift[e+1][d] for d in range(sym_days)]
                     )
                 )
 
@@ -238,8 +237,7 @@ class CPInstance:
         if ENABLE_MIN_DAILY_OPERATION:
             for d in range(D):
                 self.solver.Add(
-                    self.solver.Sum([hours[e][d] for e in range(E)])
-                    >= self.minDailyOperation
+                    self.solver.Sum([hours[e][d] for e in range(E)]) >= self.minDailyOperation
                 )
 
         # WEEKLY HOURS - Using BetweenCt for cleaner constraint
@@ -313,13 +311,13 @@ class CPInstance:
                 )
 
             # Total hours across ALL employees for ALL days must meet the total min operation
-            all_hours_in_system = [hours[e][d]
-                                   for e in range(E) for d in range(D)]
-            total_required_hours = self.minDailyOperation * D
+            # all_hours_in_system = [hours[e][d]
+            #                        for e in range(E) for d in range(D)]
+            # total_required_hours = self.minDailyOperation * D
 
-            self.solver.Add(
-                self.solver.Sum(all_hours_in_system) >= total_required_hours
-            )
+            # self.solver.Add(
+            #     self.solver.Sum(all_hours_in_system) >= total_required_hours
+            # )
 
         # IMPLIED CONSTRAINTS: Min/Max working days per employee
         # Each employee must work a minimum number of days to meet weekly hours
@@ -338,59 +336,105 @@ class CPInstance:
                     is_working) <= max_working_days)
 
         # SEARCH STRATEGY
-        all_shift_vars = []
-        all_hours_vars = []
+        # all_shift_vars = []
+        # all_hours_vars = []
 
-        # Order by DAY first, then employee - helps demand constraints propagate
+        # # Order by DAY first, then employee - helps demand constraints propagate
+        # for d in range(D):
+        #     for e in range(E):
+        #         all_shift_vars.append(shift[e][d])
+
+        # # Hours only (begin/end removed, computed post-solution)
+        # for d in range(D):
+        #     for e in range(E):
+        #         all_hours_vars.append(hours[e][d])
+
+        # all_vars = all_shift_vars + all_hours_vars
+
+        # if IS_DEFAULT or avg_forced < 0.15:
+        #     # db = self.solver.DefaultPhase(
+        #     #     all_vars,
+        #     #     # self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
+        #     #     # self.solver.ASSIGN_RANDOM_VALUE,
+        #     # )
+        #     db = self.solver.Compose([
+        #         self.solver.DefaultPhase(all_shift_vars),
+        #         self.solver.Phase(
+        #             all_hours_vars,
+        #             self.solver.CHOOSE_FIRST_UNBOUND,
+        #             self.solver.ASSIGN_MIN_VALUE,
+        #         )
+        #     ])
+        # else:
+        #     value_selector = (
+        #         self.solver.ASSIGN_MIN_VALUE if IS_TIGHT
+        #         else self.solver.ASSIGN_RANDOM_VALUE
+        #     )
+
+        #     if IS_DAY_PHASE:
+        #         day_phases = []
+        #         for d in range(D):
+        #             day_shift_vars = [shift[e][d] for e in range(E)]
+        #             day_hours_vars = [hours[e][d] for e in range(E)]
+        #             day_phases.append(self.solver.Phase(
+        #                 day_shift_vars,
+        #                 self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
+        #                 value_selector,
+        #             ))
+        #             day_phases.append(self.solver.Phase(
+        #                 day_hours_vars,
+        #                 self.solver.CHOOSE_FIRST_UNBOUND,
+        #                 self.solver.ASSIGN_MIN_VALUE,
+        #             ))
+        #         db = self.solver.Compose(day_phases)
+        #     else:
+        #         # One big phase over all days
+        #         db_shifts = self.solver.Phase(
+        #             all_shift_vars,
+        #             self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
+        #             value_selector,
+        #         )
+        #         db_times = self.solver.Phase(
+        #             all_hours_vars,
+        #             self.solver.CHOOSE_FIRST_UNBOUND,
+        #             self.solver.ASSIGN_MIN_VALUE,
+        #         )
+        #         db = self.solver.Compose([db_shifts, db_times])
+        # SEARCH STRATEGY
+        # Interleaved day phases: commit all employees for one day before moving
+        # to the next. Fires Distribute demand and daily operation constraints
+        # immediately per day, giving strong pruning for all instance types.
+        value_selector = (
+            self.solver.ASSIGN_MIN_VALUE if IS_TIGHT
+            # else self.solver.ASSIGN_RANDOM_VALUE
+            else self.solver.ASSIGN_MAX_VALUE
+        )
+
+        day_phases = []
         for d in range(D):
-            for e in range(E):
-                all_shift_vars.append(shift[e][d])
-
-        # Hours only (begin/end removed, computed post-solution)
-        for d in range(D):
-            for e in range(E):
-                all_hours_vars.append(hours[e][d])
-
-        all_vars = all_shift_vars + all_hours_vars
-
-        if IS_DEFAULT:
-            db = self.solver.DefaultPhase(
-                all_vars,
-                # self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
-                # self.solver.ASSIGN_RANDOM_VALUE,
-            )
-        else:
-            # TODO: Would impact based search heuristics help here??
-            # PHASE 1: Decide Shifts dynamically based on tightness
-            if IS_TIGHT:
-                # Deterministic: Fail-first, assign smallest values (good for constrained spaces)
-                db_shifts = self.solver.Phase(
-                    all_shift_vars,
-                    self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
-                    self.solver.ASSIGN_MIN_VALUE,
-                )
-            else:
-                # Randomized: Good for exploration in looser problem spaces
-                db_shifts = self.solver.Phase(
-                    all_shift_vars,
-                    self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
-                    self.solver.ASSIGN_RANDOM_VALUE,
-                )
-
-            # PHASE 2: Decide Hours
-            db_times = self.solver.Phase(
-                all_hours_vars,
+            day_shift_vars = [shift[e][d] for e in range(E)]
+            day_hours_vars = [hours[e][d] for e in range(E)]
+            day_phases.append(self.solver.Phase(
+                day_shift_vars,
+                self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
+                value_selector,
+            ))
+            day_phases.append(self.solver.Phase(
+                day_hours_vars,
                 self.solver.CHOOSE_FIRST_UNBOUND,
                 self.solver.ASSIGN_MIN_VALUE,
-            )
-
-            db = self.solver.Compose([db_shifts, db_times])
+            ))
+        db = self.solver.Compose(day_phases)
 
         # MONITORS & LIMITS
         monitors = []
         if IS_RESTART:
-            # Use LubyRestarts for exploration (good for loose instances)
-            monitors.append(self.solver.LubyRestart(100))
+            if avg_forced < 0.15:
+                # Loose instances: restart aggressively, many symmetric solutions exist
+                monitors.append(self.solver.LubyRestart(50))
+            else:
+                # Use LubyRestarts for exploration (good for loose instances)
+                monitors.append(self.solver.LubyRestart(100))
 
         if time_limit_seconds:
             monitors.append(self.solver.TimeLimit(
