@@ -196,16 +196,16 @@ class CPInstance:
         training_days = min(D, 4)
         if training_days == 4:
             for e in range(E):
-                # s = shift[e]
-                # self.solver.Add(s[0] != s[1])
-                # self.solver.Add(s[0] != s[2])
-                # self.solver.Add(s[0] != s[3])
-                # self.solver.Add(s[1] != s[2])
-                # self.solver.Add(s[1] != s[3])
-                # self.solver.Add(s[2] != s[3])
-                self.solver.Add(
-                    self.solver.AllDifferent([shift[e][d] for d in range(4)])
-                )
+                s = shift[e]
+                self.solver.Add(s[0] != s[1])
+                self.solver.Add(s[0] != s[2])
+                self.solver.Add(s[0] != s[3])
+                self.solver.Add(s[1] != s[2])
+                self.solver.Add(s[1] != s[3])
+                self.solver.Add(s[2] != s[3])
+                # self.solver.Add(
+                #     self.solver.AllDifferent([shift[e][d] for d in range(4)])
+                # )
 
         # for e in range(E):
         #     training_days = min(D, 4)
