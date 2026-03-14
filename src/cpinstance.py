@@ -348,7 +348,7 @@ class CPInstance:
             day_hours_vars = [hours[e][d] for e in range(E)]
             day_phases.append(self.solver.Phase(
                 day_shift_vars,
-                self.solver.CHOOSE_FIRST_UNBOUND,
+                self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
                 value_selector,
             ))
             day_phases.append(self.solver.Phase(
