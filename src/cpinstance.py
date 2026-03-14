@@ -8,8 +8,9 @@ from typing import Optional, List, Tuple
 
 from ortools.constraint_solver import pywrapcp
 
-# ========== CONSTRAINT FLAGS (for incremental testing) ==========
-# Core constraints (required by spec)
+# CONSTRAINT FLAGS
+
+# Core constraints - required by spec
 ENABLE_TABLE_CONSTRAINTS = True  # (shift, hours) validity links
 ENABLE_TRAINING = True  # AllDifferent for first 4 days
 ENABLE_DEMAND = True  # Distribute for minDemandDayShift
@@ -18,30 +19,23 @@ ENABLE_WEEKLY_HOURS = True  # BetweenCt for min/max weekly
 ENABLE_NIGHT_CONSECUTIVE = True  # Sliding window for maxConsecutiveNightShift
 ENABLE_NIGHT_TOTAL = True  # Total night shift limit
 
-# Redundant constraints (implied, for stronger propagation)
+# Redundant constraints - implied, for stronger propagation
 ENABLE_SYMMETRY_BREAKING = True  # Lexicographic employee ordering
 ENABLE_REDUNDANT_MAX_OFF = True  # Upper bound on off-shifts per day
 ENABLE_TOTAL_HORIZON = True  # Global min/max hours over entire period
 ENABLE_IMPLIED_WORKING_DAYS = True  # Min/max working days per employee
 
-# Search strategy flags
+# Search strategy
 IS_DEFAULT = False  # Use DefaultPhase (vs custom Phase)
 IS_TIGHT = False  # Tight mode: deterministic, fail-first
 IS_RESTART = False  # Use LubyRestart for exploration
 IS_DAY_PHASE = True
 
 # Ethical/Employee-friendly flags
-# When ETHICAL_OFF_FIRST=True, OFF_SHIFT=0 so ASSIGN_MIN_VALUE tries off-shifts
-# first, giving employees more rest days. When False, OFF_SHIFT=4 so working
-# shifts (1,2,3) are preferred, maximizing productivity.
-
-# NOTE: in this same spirit maybe reorganizing the shift preferring day shifts first would
-# give better propoagation
+# NOTE: In this same spirit maybe reorganizing the shift preferring
+# other shifts first would give better propoagation
 ETHICAL_OFF_FIRST = False  # Prefer giving employees days off
-# When ENABLE_POST_PROCESS=True, start times are evenly distributed within each
-# shift to spread out coverage. When False, everyone starts at shift start time.
 ENABLE_POST_PROCESS = True  # Even spread of start times within shifts
-# =================================================================
 
 
 class CPInstance:
@@ -144,7 +138,6 @@ class CPInstance:
         Employee Scheduling Model
         """
         # PRECOMPUTATION
-        # Tuples are now (shift, hours) pairs - begin/end computed post-solution
         valid_tuples = self._precompute_tuples()
         valid_shifts = sorted({t[0] for t in valid_tuples})
         valid_hours = sorted({t[1] for t in valid_tuples})
@@ -159,7 +152,7 @@ class CPInstance:
         # INITIALIZATION
         self.solver = pywrapcp.Solver("EmployeeScheduling")
 
-        # VARIABLES (simplified: only shift and hours, no begin/end)
+        # VARIABLES
         shift = [
             [self.solver.IntVar(valid_shifts, f"s_{e}_{d}") for d in range(D)]
             for e in range(E)
@@ -179,8 +172,7 @@ class CPInstance:
             for d in range(D)
         ) / (D * E)
 
-        # TABLE CONSTRAINTS (AllowedAssignments)
-        # Links shift and hours via valid (shift, hours) pairs
+        # TABLE CONSTRAINTS
         if ENABLE_TABLE_CONSTRAINTS:
             for e in range(E):
                 for d in range(D):
@@ -215,7 +207,7 @@ class CPInstance:
                         )
                     )
 
-        # DEMAND - Using Distribute (global cardinality constraint)
+        # DEMAND
         if ENABLE_DEMAND:
             for d in range(D):
                 day_shifts = [shift[e][d] for e in range(E)]
@@ -237,10 +229,11 @@ class CPInstance:
         if ENABLE_MIN_DAILY_OPERATION:
             for d in range(D):
                 self.solver.Add(
-                    self.solver.Sum([hours[e][d] for e in range(E)]) >= self.minDailyOperation
+                    self.solver.Sum([hours[e][d]
+                                    for e in range(E)]) >= self.minDailyOperation
                 )
 
-        # WEEKLY HOURS - Using BetweenCt for cleaner constraint
+        # WEEKLY HOURS
         if ENABLE_WEEKLY_HOURS:
             for e in range(E):
                 for w in range(W):
@@ -295,7 +288,7 @@ class CPInstance:
                     )
 
         # TOTAL HORIZON
-        # NOTE: This seems to somewhat help 21 day cases
+        # NOTE: This seems to somewhat help 21 day cases.
         if ENABLE_TOTAL_HORIZON:
             for e in range(E):
                 employee_all_hours = [hours[e][d] for d in range(D)]
@@ -310,7 +303,7 @@ class CPInstance:
                         employee_all_hours) <= self.maxWeeklyWork * W
                 )
 
-        # IMPLIED CONSTRAINTS: Min/Max working days per employee
+        # IMPLIED CONSTRAINTS
         # Each employee must work a minimum number of days to meet weekly hours
         if ENABLE_IMPLIED_WORKING_DAYS:
             min_working_days = math.ceil(
@@ -441,14 +434,14 @@ class CPInstance:
             # Shift start times for computing begin/end
             SHIFT_START = {1: 0, 2: 8, 3: 16}  # Night, Day, Evening
 
-            # Step 1: Extract raw solution (shift, hours) for each (employee, day)
+            # Extract raw solution (shift, hours) for each (employee, day)
             raw_solution = {}
             for e in range(E):
                 for d in range(D):
                     raw_solution[(e, d)] = (
                         shift[e][d].Value(), hours[e][d].Value())
 
-            # Step 2: Compute begin times
+            # Compute begin times
             begin_times = {}
 
             if ENABLE_POST_PROCESS:
@@ -484,7 +477,7 @@ class CPInstance:
                     if shift_val != self.OFF_SHIFT:
                         begin_times[(e, d)] = SHIFT_START[shift_val]
 
-            # Step 3: Build final schedule
+            # Build final schedule
             schedule = []
             for e in range(E):
                 emp_schedule = []
