@@ -181,6 +181,14 @@ class CPInstance:
 
         # TABLE CONSTRAINTS (AllowedAssignments)
         # Links shift and hours via valid (shift, hours) pairs
+        # if ENABLE_TABLE_CONSTRAINTS:
+        #     for e in range(E):
+        #         for d in range(D):
+        #             self.solver.Add(
+        #                 self.solver.AllowedAssignments(
+        #                     [shift[e][d], hours[e][d]], valid_tuples
+        #                 )
+        #             )
         if ENABLE_TABLE_CONSTRAINTS:
             for e in range(E):
                 for d in range(D):
@@ -192,7 +200,7 @@ class CPInstance:
         # Force Employee e's entire 21+ day schedule to be lexicographically
         # less than or equal to Employee e+1's schedule.
         if ENABLE_SYMMETRY_BREAKING:
-            sym_days = min(D, 7)
+            sym_days = min(D, 14)
             for e in range(E - 1):
                 self.solver.Add(
                     self.solver.LexicalLessOrEqual(
