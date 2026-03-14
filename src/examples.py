@@ -26,7 +26,6 @@ def run_australia():
 
     all_vars = [wa, nt, sa, q, nsw, v] + arr
 
-
     db = solver.DefaultPhase(all_vars)
     solver.NewSearch(db)
 
