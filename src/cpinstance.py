@@ -310,15 +310,6 @@ class CPInstance:
                         employee_all_hours) <= self.maxWeeklyWork * W
                 )
 
-            # Total hours across ALL employees for ALL days must meet the total min operation
-            # all_hours_in_system = [hours[e][d]
-            #                        for e in range(E) for d in range(D)]
-            # total_required_hours = self.minDailyOperation * D
-
-            # self.solver.Add(
-            #     self.solver.Sum(all_hours_in_system) >= total_required_hours
-            # )
-
         # IMPLIED CONSTRAINTS: Min/Max working days per employee
         # Each employee must work a minimum number of days to meet weekly hours
         if ENABLE_IMPLIED_WORKING_DAYS:
@@ -416,7 +407,7 @@ class CPInstance:
             day_hours_vars = [hours[e][d] for e in range(E)]
             day_phases.append(self.solver.Phase(
                 day_shift_vars,
-                self.solver.CHOOSE_MIN_SIZE_LOWEST_MIN,
+                self.solver.CHOOSE_FIRST_UNBOUND,
                 value_selector,
             ))
             day_phases.append(self.solver.Phase(
