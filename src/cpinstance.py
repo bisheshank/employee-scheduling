@@ -283,24 +283,7 @@ class CPInstance:
 
         # REDUNDANT CONSTRAINTS - Max off-shifts per day
         if ENABLE_REDUNDANT_MAX_OFF:
-            # for d in range(D):
-            #     min_workers_demand = sum(
-            #         self.minDemandDayShift[d][s] for s in self.WORKING_SHIFTS
-            #     )
-            #     min_workers_hours = math.ceil(
-            #         self.minDailyOperation / self.maxDailyWork
-            #     )
-            #     min_workers = max(min_workers_demand, min_workers_hours)
-            #     max_off = E - min_workers
-            #     if max_off >= 0 and max_off < E:
-            #         self.solver.Add(
-            #             self.solver.Sum(
-            #                 [shift[e][d] == self.OFF_SHIFT for e in range(E)]
-            #             )
-            #             <= max_off
-            #         )
             for d in range(D):
-                # Original: cap off-shifts from above (lower bounds total workers)
                 min_workers_demand = sum(
                     self.minDemandDayShift[d][s] for s in self.WORKING_SHIFTS
                 )
@@ -315,18 +298,6 @@ class CPInstance:
                             [shift[e][d] == self.OFF_SHIFT for e in range(E)]
                         )
                         <= max_off
-                    )
-                # New: cap each working shift from above
-                for s in self.WORKING_SHIFTS:
-                    other_demand = sum(
-                        self.minDemandDayShift[d][os]
-                        for os in self.WORKING_SHIFTS if os != s
-                    )
-                    self.solver.Add(
-                        self.solver.Sum([
-                            self.solver.IsEqualCstVar(shift[e][d], s)
-                            for e in range(E)
-                        ]) <= E - other_demand
                     )
 
         # TOTAL HORIZON
