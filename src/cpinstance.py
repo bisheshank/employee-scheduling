@@ -181,14 +181,6 @@ class CPInstance:
 
         # TABLE CONSTRAINTS (AllowedAssignments)
         # Links shift and hours via valid (shift, hours) pairs
-        # if ENABLE_TABLE_CONSTRAINTS:
-        #     for e in range(E):
-        #         for d in range(D):
-        #             self.solver.Add(
-        #                 self.solver.AllowedAssignments(
-        #                     [shift[e][d], hours[e][d]], valid_tuples
-        #                 )
-        #             )
         if ENABLE_TABLE_CONSTRAINTS:
             for e in range(E):
                 for d in range(D):
@@ -200,7 +192,7 @@ class CPInstance:
         # Force Employee e's entire 21+ day schedule to be lexicographically
         # less than or equal to Employee e+1's schedule.
         if ENABLE_SYMMETRY_BREAKING:
-            sym_days = min(D, 14)
+            sym_days = min(D, 7)
             for e in range(E - 1):
                 self.solver.Add(
                     self.solver.LexicalLessOrEqual(
@@ -283,7 +275,24 @@ class CPInstance:
 
         # REDUNDANT CONSTRAINTS - Max off-shifts per day
         if ENABLE_REDUNDANT_MAX_OFF:
+            # for d in range(D):
+            #     min_workers_demand = sum(
+            #         self.minDemandDayShift[d][s] for s in self.WORKING_SHIFTS
+            #     )
+            #     min_workers_hours = math.ceil(
+            #         self.minDailyOperation / self.maxDailyWork
+            #     )
+            #     min_workers = max(min_workers_demand, min_workers_hours)
+            #     max_off = E - min_workers
+            #     if max_off >= 0 and max_off < E:
+            #         self.solver.Add(
+            #             self.solver.Sum(
+            #                 [shift[e][d] == self.OFF_SHIFT for e in range(E)]
+            #             )
+            #             <= max_off
+            #         )
             for d in range(D):
+                # Original: cap off-shifts from above (lower bounds total workers)
                 min_workers_demand = sum(
                     self.minDemandDayShift[d][s] for s in self.WORKING_SHIFTS
                 )
@@ -298,6 +307,18 @@ class CPInstance:
                             [shift[e][d] == self.OFF_SHIFT for e in range(E)]
                         )
                         <= max_off
+                    )
+                # New: cap each working shift from above
+                for s in self.WORKING_SHIFTS:
+                    other_demand = sum(
+                        self.minDemandDayShift[d][os]
+                        for os in self.WORKING_SHIFTS if os != s
+                    )
+                    self.solver.Add(
+                        self.solver.Sum([
+                            self.solver.IsEqualCstVar(shift[e][d], s)
+                            for e in range(E)
+                        ]) <= E - other_demand
                     )
 
         # TOTAL HORIZON
